@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.aba.smartsleep.core.model.SessionModelsTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-08-21T00:38:53" hostname="CSA" time="0.102">
+  <properties/>
+  <testcase name="sensor batch keeps ordered samples when original list is mutated()" classname="com.aba.smartsleep.core.model.SessionModelsTest" time="0.059"/>
+  <testcase name="wake window must end at target alarm()" classname="com.aba.smartsleep.core.model.SessionModelsTest" time="0.014"/>
+  <testcase name="alarm settings reject unsupported wake windows()" classname="com.aba.smartsleep.core.model.SessionModelsTest" time="0.021"/>
+  <testcase name="sensor batch rejects unordered samples()" classname="com.aba.smartsleep.core.model.SessionModelsTest" time="0.001"/>
+  <testcase name="alarm settings reject probabilities outside unit interval()" classname="com.aba.smartsleep.core.model.SessionModelsTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

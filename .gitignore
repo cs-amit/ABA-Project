@@ -1,0 +1,4 @@
+/.gradle/
+/.tooling/
+/local.properties
+/wear/libs/samsung-health-sensor-api.aar

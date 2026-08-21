@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <application android:label="Smart Sleep">
+        <receiver
+            android:name=".app.alarm.AlarmReceiver"
+            android:exported="false" />
+    </application>
+</manifest>
