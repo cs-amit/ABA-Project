@@ -2,3 +2,14 @@
 /.tooling/
 /local.properties
 /wear/libs/samsung-health-sensor-api.aar
+/app/build/
+/core/build/
+/wear/build/
+# Local ML outputs and Python caches
+ml/artifacts/
+ml/__pycache__/
+ml/tests/__pycache__/
+*.py[cod]
+/.kotlin/
+/.physionet-netrc
+*.hprof

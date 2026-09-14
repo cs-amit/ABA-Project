@@ -16,14 +16,54 @@ class AlarmCoordinatorTest {
     }
 
     @Test
-    fun `first trigger wins over all later triggers`() {
+    fun `rejects fallback target in the past`() {
+        val scheduler = AlarmScheduler(FakeAlarmGateway(), FixedClock(10_000))
+
+        try {
+            scheduler.scheduleFallback("s1", 9_999)
+        } catch (error: IllegalArgumentException) {
+            return
+        }
+
+        throw AssertionError("Expected a past fallback target to be rejected")
+    }
+
+    @Test
+    fun `light sleep starts haptics before delayed phone audio`() {
         val output = FakeAlarmOutput()
-        val coordinator = AlarmCoordinator(output)
+        val delayScheduler = FakeDelayScheduler()
+        val coordinator = AlarmCoordinator(
+            sessionId = "s1",
+            output = output,
+            phoneAudioDelayMillis = 500,
+            delayScheduler = delayScheduler,
+            claimStore = AlarmClaimStore(),
+        )
 
         assertTrue(coordinator.trigger(AlarmReason.LIGHT_SLEEP))
-        assertFalse(coordinator.trigger(AlarmReason.FALLBACK))
         assertEquals(1, output.hapticStarts)
+        assertEquals(0, output.audioStarts)
+        assertEquals(500L, delayScheduler.delayMillis)
+
+        delayScheduler.runScheduledAction()
+
         assertEquals(1, output.audioStarts)
+    }
+
+    @Test
+    fun `session claim prevents fallback output after light sleep trigger`() {
+        val claimStore = AlarmClaimStore()
+        val lightSleepOutput = FakeAlarmOutput()
+        val fallbackOutput = FakeAlarmOutput()
+        val lightSleep = AlarmCoordinator("s1", lightSleepOutput, claimStore = claimStore)
+        val fallback = AlarmCoordinator("s1", fallbackOutput, claimStore = claimStore)
+
+        assertTrue(lightSleep.trigger(AlarmReason.LIGHT_SLEEP))
+        assertFalse(fallback.trigger(AlarmReason.FALLBACK))
+        assertEquals(1, lightSleepOutput.hapticStarts)
+        assertEquals(1, lightSleepOutput.audioStarts)
+        assertEquals(0, fallbackOutput.hapticStarts)
+        assertEquals(0, fallbackOutput.audioStarts)
     }
 
     private class FixedClock(private val nowMillis: Long) : Clock {
@@ -48,6 +88,20 @@ class AlarmCoordinatorTest {
 
         override fun startPhoneAudio() {
             audioStarts += 1
+        }
+    }
+
+    private class FakeDelayScheduler : AlarmDelayScheduler {
+        var delayMillis: Long? = null
+        private var action: (() -> Unit)? = null
+
+        override fun schedule(delayMillis: Long, action: () -> Unit) {
+            this.delayMillis = delayMillis
+            this.action = action
+        }
+
+        fun runScheduledAction() {
+            checkNotNull(action).invoke()
         }
     }
 }

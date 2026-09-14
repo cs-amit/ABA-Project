@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    id("org.jetbrains.kotlin.kapt")
 }
 
 android {
@@ -14,6 +15,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures { compose = true }
@@ -26,6 +28,15 @@ android {
 
 kotlin { jvmToolchain(17) }
 
+val resolvedDebugApplicationId = objects.property(String::class.java)
+rootProject.extensions.extraProperties["appDebugApplicationId"] = resolvedDebugApplicationId
+
+androidComponents {
+    onVariants(selector().withBuildType("debug")) { variant ->
+        resolvedDebugApplicationId.set(variant.applicationId)
+    }
+}
+
 dependencies {
     implementation(project(":core"))
     implementation(platform(libs.androidx.compose.bom))
@@ -36,6 +47,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.onnxruntime.android)
-    annotationProcessor(libs.androidx.room.compiler)
+    implementation("com.google.android.gms:play-services-wearable:20.0.1")
+    kapt(libs.androidx.room.compiler)
     testImplementation(libs.junit4)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }

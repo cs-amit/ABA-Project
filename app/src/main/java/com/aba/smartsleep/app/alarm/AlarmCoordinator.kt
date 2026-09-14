@@ -1,6 +1,7 @@
 package com.aba.smartsleep.app.alarm
 
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
 
 enum class AlarmReason {
     LIGHT_SLEEP,
@@ -16,15 +17,26 @@ fun interface AlarmDelayScheduler {
     fun schedule(delayMillis: Long, action: () -> Unit)
 }
 
+class AlarmClaimStore {
+    private val claims = ConcurrentHashMap<String, AtomicBoolean>()
+
+    fun claim(sessionId: String): Boolean =
+        claims.getOrPut(sessionId) { AtomicBoolean(false) }.compareAndSet(false, true)
+}
+
+object SharedAlarmClaims {
+    val store = AlarmClaimStore()
+}
+
 class AlarmCoordinator(
+    private val sessionId: String,
     private val output: AlarmOutput,
     private val phoneAudioDelayMillis: Long = 0,
     private val delayScheduler: AlarmDelayScheduler = AlarmDelayScheduler { _, action -> action() },
+    private val claimStore: AlarmClaimStore = SharedAlarmClaims.store,
 ) {
-    private val triggered = AtomicBoolean(false)
-
     fun trigger(reason: AlarmReason): Boolean {
-        if (!triggered.compareAndSet(false, true)) {
+        if (!claimStore.claim(sessionId)) {
             return false
         }
 

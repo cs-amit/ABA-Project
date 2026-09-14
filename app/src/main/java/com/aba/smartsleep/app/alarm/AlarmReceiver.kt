@@ -4,9 +4,12 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.Context
 import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.Manifest
+import android.os.Build
 import android.media.Ringtone
 import android.media.RingtoneManager
 
@@ -17,8 +20,11 @@ class AlarmReceiver : BroadcastReceiver() {
         }
 
         val appContext = context.applicationContext
-        showAlarmNotification(appContext, intent.getStringExtra(EXTRA_SESSION_ID).orEmpty())
-        AlarmCoordinator(PhoneAlarmOutput(appContext)).trigger(AlarmReason.FALLBACK)
+        val sessionId = intent.getStringExtra(EXTRA_SESSION_ID).orEmpty()
+        AlarmCoordinator(sessionId, PhoneAlarmOutput(appContext)).trigger(AlarmReason.FALLBACK)
+        if (canPostNotifications(appContext)) {
+            showAlarmNotification(appContext, sessionId)
+        }
     }
 
     private fun showAlarmNotification(context: Context, sessionId: String) {
@@ -26,10 +32,16 @@ class AlarmReceiver : BroadcastReceiver() {
         notificationManager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "Alarm", NotificationManager.IMPORTANCE_HIGH),
         )
-        val fullScreenIntent = PendingIntent.getBroadcast(
+        val fullScreenIntent = PendingIntent.getActivity(
             context,
-            sessionId.hashCode(),
-            fallbackIntent(context, sessionId),
+            sessionId.hashCode() xor DISPLAY_REQUEST_CODE_MASK,
+            AlarmActivity.displayIntent(context, sessionId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val dismissIntent = PendingIntent.getBroadcast(
+            context,
+            sessionId.hashCode() xor DISMISS_REQUEST_CODE_MASK,
+            AlarmDismissReceiver.dismissIntent(context, sessionId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = Notification.Builder(context, CHANNEL_ID)
@@ -37,17 +49,25 @@ class AlarmReceiver : BroadcastReceiver() {
             .setContentTitle("Smart Sleep alarm")
             .setContentText("Your scheduled alarm is ringing")
             .setCategory(Notification.CATEGORY_ALARM)
+            .setContentIntent(fullScreenIntent)
             .setFullScreenIntent(fullScreenIntent, true)
+            .addAction(Notification.Action.Builder(0, "Dismiss", dismissIntent).build())
             .setOngoing(true)
             .build()
 
         notificationManager.notify(sessionId.hashCode(), notification)
     }
 
+    private fun canPostNotifications(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
     companion object {
         private const val ACTION_FALLBACK = "com.aba.smartsleep.app.alarm.FALLBACK"
         private const val EXTRA_SESSION_ID = "session_id"
         private const val CHANNEL_ID = "smart_sleep_alarm"
+        private const val DISPLAY_REQUEST_CODE_MASK = 0x51A7
+        private const val DISMISS_REQUEST_CODE_MASK = 0xD155
 
         fun fallbackIntent(context: Context, sessionId: String): Intent =
             Intent(context, AlarmReceiver::class.java)
@@ -62,13 +82,22 @@ private class PhoneAlarmOutput(context: Context) : AlarmOutput {
     override fun startWatchHaptics() = Unit
 
     override fun startPhoneAudio() {
+        AlarmAudio.start(appContext)
+    }
+}
+
+internal object AlarmAudio {
+    private var activeRingtone: Ringtone? = null
+
+    fun start(context: Context) {
         activeRingtone = RingtoneManager.getRingtone(
-            appContext,
+            context,
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
         ).also(Ringtone::play)
     }
 
-    private companion object {
-        var activeRingtone: Ringtone? = null
+    fun stop() {
+        activeRingtone?.stop()
+        activeRingtone = null
     }
 }

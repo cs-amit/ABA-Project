@@ -46,10 +46,10 @@ class AndroidAlarmGateway(context: Context) : AlarmGateway {
             AlarmReceiver.fallbackIntent(appContext, request.sessionId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val showIntent = PendingIntent.getBroadcast(
+        val showIntent = PendingIntent.getActivity(
             appContext,
-            request.sessionId.hashCode(),
-            AlarmReceiver.fallbackIntent(appContext, request.sessionId),
+            request.sessionId.hashCode() xor DISPLAY_REQUEST_CODE_MASK,
+            AlarmActivity.displayIntent(appContext, request.sessionId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -57,5 +57,9 @@ class AndroidAlarmGateway(context: Context) : AlarmGateway {
             AlarmManager.AlarmClockInfo(request.triggerAtMillis, showIntent),
             operation,
         )
+    }
+
+    private companion object {
+        const val DISPLAY_REQUEST_CODE_MASK = 0x51A7
     }
 }

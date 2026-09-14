@@ -4,7 +4,7 @@
 
 **Goal:** Build a Samsung Galaxy Watch4 and Android phone wellness prototype that detects likely light sleep in a chosen wake window and always delivers a safe fallback alarm.
 
-**Architecture:** A Wear OS app collects Samsung accelerometer and heart-rate/IBI data, batches it to the paired phone through the Wear OS Data Layer, and provides watch haptics. The phone persists derived session records locally, builds causal 30-second feature epochs, runs an exported ONNX CNN-GRU or CNN-LSTM model, and owns all alarm decisions and phone audio.
+**Architecture:** A Wear OS app collects Samsung accelerometer and heart-rate/IBI data, batches it to the paired phone through the Wear OS Data Layer, and provides watch haptics. The phone persists derived session records locally, builds causal 30-second feature epochs, runs an exported ONNX causal CNN-GRU model (with CNN-LSTM retained only as an optional comparison), and owns all alarm decisions and phone audio.
 
 **Tech Stack:** Kotlin, Gradle Kotlin DSL, Jetpack Compose, Wear OS Compose, Room, Kotlin coroutines/Flow, Samsung Health Sensor SDK 1.4.1, Google Play Services Wearable 20.0.1, ONNX Runtime Android 1.20.1, Python 3.11, PyTorch 2.5.1, scikit-learn 1.6.1, pytest.
 
@@ -401,7 +401,7 @@ Expected: all tests PASS; duplicate batches do not create duplicate persisted ep
 
 - [ ] **Step 1: Write the dataset protocol before downloading records**
 
-Document the selection gate in `docs/data/public-dataset-protocol.md`: use the MESA Sleep dataset only after confirming approved access to wrist actigraphy, PSG stage labels, and ECG/heart-rate derivation for the chosen participants. Record the MESA release, access date, licence/terms, selected signal files, epoch-label mapping, and exclusions in `dataset_manifest.json`. Do not substitute EEG-only data.
+Document the selection gate in `docs/data/public-dataset-protocol.md`: use the open-access BIDSleep dataset as the primary source (47 healthy participants, 253 nights, Apple Watch accelerometer + heart rate, 30-second labels). Record the BIDSleep release, access date, licence/terms, selected signal files, epoch-label mapping, and exclusions in `dataset_manifest.json`. MESA access has only been requested as an optional later comparison dataset; do not claim MESA data has been downloaded or used, and do not substitute EEG-only data.
 
 - [ ] **Step 2: Write failing data-contract tests**
 
@@ -428,9 +428,9 @@ Implement `validate_epoch_frame(frame)` requiring `subject_id`, `epoch_start_s`,
 
 - [ ] **Step 5: Implement preparation and feature parity tests**
 
-Implement `prepare_dataset.py` to read MESA-derived source records through one explicit adapter function, create 30-second epochs, calculate the same feature names/formulas as Task 6, validate the frame, and write Parquet plus manifest. Add fixture-record tests that compare expected activity-count, RMSSD, and label values. Run: `python -m pytest ml/tests -q`.
+Implement `prepare_dataset.py` to read BIDSleep source records through one explicit adapter function, create 30-second epochs, calculate the same feature names/formulas as Task 6, validate the frame, and write Parquet plus manifest. Add fixture-record tests that compare expected activity-count, RMSSD, and label values. Run: `python -m pytest ml/tests -q`.
 
-Expected: PASS. If MESA access is not approved by the end of Day 2, preserve this tested pipeline and document the blocked data-access condition in the project risk log; do not claim model-validation results from unmatched data.
+Expected: PASS. If the local BIDSleep source is unavailable, preserve this tested pipeline and document the blocked data-access condition in the project risk log; do not claim model-validation results from unmatched data. MESA remains an optional later comparison only.
 
 ## Task 8: Train, Compare, and Export the Causal Models
 

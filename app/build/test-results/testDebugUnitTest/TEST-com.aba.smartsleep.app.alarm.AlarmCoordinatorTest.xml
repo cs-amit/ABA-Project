@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.aba.smartsleep.app.alarm.AlarmCoordinatorTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-08-21T00:51:18" hostname="CSA" time="0.017">
-  <properties/>
-  <testcase name="first trigger wins over all later triggers" classname="com.aba.smartsleep.app.alarm.AlarmCoordinatorTest" time="0.006"/>
-  <testcase name="schedules fallback at configured target" classname="com.aba.smartsleep.app.alarm.AlarmCoordinatorTest" time="0.011"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>
