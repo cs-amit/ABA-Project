@@ -9,7 +9,7 @@ import random
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, precision_score, recall_score
 from sklearn.preprocessing import RobustScaler
 import torch
 from torch import nn
@@ -187,6 +187,8 @@ def _per_subject(
             "subject_id": str(subject),
             "epoch_count": int(selected.sum()),
             "prevalence": float(labels[selected].mean()),
+            "accuracy": float(accuracy_score(labels[selected], predictions[selected])),
+            "balanced_accuracy": float(balanced_accuracy_score(labels[selected], predictions[selected])),
             "precision": float(precision_score(labels[selected], predictions[selected], zero_division=0)),
             "recall": float(recall_score(labels[selected], predictions[selected], zero_division=0)),
             "f1": float(f1_score(labels[selected], predictions[selected], zero_division=0)),
@@ -206,13 +208,16 @@ def _condition_report(
     threshold, validation_f1 = select_validation_threshold(validation_y, validation_probabilities)
     test_probabilities = _predict(model, test_x)
     metrics = evaluate_binary_probabilities(test_y, test_probabilities, threshold)
+    per_subject = _per_subject(test_subjects, test_y, test_probabilities, threshold)
     report = {
         "validation_threshold": threshold,
         "validation_f1": validation_f1,
         "test": metrics,
+        "participant_macro_f1": float(per_subject["f1"].mean()),
+        "participant_macro_balanced_accuracy": float(per_subject["balanced_accuracy"].mean()),
         "calibration": _calibration(test_y, test_probabilities),
     }
-    return report, _per_subject(test_subjects, test_y, test_probabilities, threshold)
+    return report, per_subject
 
 
 def run_transfer_experiment(
@@ -224,7 +229,7 @@ def run_transfer_experiment(
     """Run the two predeclared conditions and evaluate BIDSleep test once each."""
     mesa = adapt_mesa_common(pd.read_parquet(Path(mesa_artifacts) / "epochs.parquet"))
     bidsleep = adapt_bidsleep_common(pd.read_parquet(Path(bidsleep_artifacts) / "epochs.parquet"))
-    mesa_x, mesa_y, _, mesa_splits = build_common_sequences(mesa)
+    mesa_x, mesa_y, mesa_subjects, mesa_splits = build_common_sequences(mesa)
     target_x, target_y, target_subjects, target_splits = build_common_sequences(bidsleep)
     for name, labels, splits in (("MESA", mesa_y, mesa_splits), ("BIDSleep", target_y, target_splits)):
         for split in ("train", "validation", "test"):
@@ -276,7 +281,7 @@ def run_transfer_experiment(
         "feature_columns": COMMON_FEATURE_COLUMNS,
         "architecture": {"name": "causal_cnn_gru", "hidden_size": 32, "sequence_epochs": 10},
         "subject_counts": {
-            "mesa": {split: int(len(set(build_common_sequences(mesa[mesa.split == split])[2]))) for split in ("train", "validation", "test")},
+            "mesa": {split: int(len(set(mesa_subjects[mesa_splits == split]))) for split in ("train", "validation", "test")},
             "bidsleep": {split: int(len(set(target_subjects[target_splits == split]))) for split in ("train", "validation", "test")},
         },
         "scalers": {
