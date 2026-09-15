@@ -89,9 +89,9 @@ def derive_cardiac_epochs(rpoints: pd.DataFrame, epoch_count: int) -> pd.DataFra
     frame["epoch"] = frame["epoch"].astype(int)
 
     totals = frame.groupby("epoch").size()
-    normal = frame[frame["Type"] == 1].copy()
-    normal_counts = normal.groupby("epoch").size()
-    normal["ibi_ms"] = normal["seconds"].diff() * 1000.0
+    normal_counts = frame[frame["Type"] == 1].groupby("epoch").size()
+    frame["ibi_ms"] = frame["seconds"].diff() * 1000.0
+    normal = frame[(frame["Type"] == 1) & (frame["Type"].shift() == 1)].copy()
     normal.loc[~normal["ibi_ms"].between(300.0, 2000.0), "ibi_ms"] = np.nan
     normal["heart_rate_bpm"] = 60000.0 / normal["ibi_ms"]
 

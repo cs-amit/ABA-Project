@@ -94,6 +94,21 @@ def test_derive_cardiac_epochs_excludes_non_normal_beats_from_intervals():
     assert cardiac.loc[0, "heart_rate_valid_ratio"] == 0.75
 
 
+def test_derive_cardiac_epochs_does_not_bridge_across_an_abnormal_beat():
+    rpoints = pd.DataFrame(
+        {
+            "epoch": [1, 1, 1],
+            "seconds": [1.0, 1.6, 2.2],
+            "Type": [1, 2, 1],
+        }
+    )
+
+    cardiac = derive_cardiac_epochs(rpoints, epoch_count=1)
+
+    assert cardiac.loc[0, "ibi_mean_ms"] == 0.0
+    assert cardiac.loc[0, "heart_rate_mean"] == 0.0
+
+
 @pytest.mark.parametrize(
     "rpoints, message",
     [
