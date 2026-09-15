@@ -86,6 +86,17 @@ def test_select_expansion_cohort_requires_flags_and_all_three_files():
     assert "0026" not in set(selected.subject_id)
 
 
+def test_select_expansion_cohort_can_require_official_overlap_eligibility():
+    phenotype = _phenotype()
+    ids = [f"{value:04d}" for value in phenotype.mesaid]
+    catalog = build_file_catalog(_metadata(ids))
+    eligible = set(ids) - {"0025", "0026"}
+
+    selected = select_expansion_cohort(phenotype, catalog, set(ids[:24]), eligible_ids=eligible)
+
+    assert set(selected.subject_id) <= eligible
+
+
 def _download_manifest(contents):
     row = {}
     for kind, (path, body) in contents.items():

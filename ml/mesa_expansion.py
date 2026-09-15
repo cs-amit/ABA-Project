@@ -64,6 +64,7 @@ def select_expansion_cohort(
     excluded_ids: set[str],
     count: int = 500,
     seed: int = 20260916,
+    eligible_ids: set[str] | None = None,
 ) -> pd.DataFrame:
     """Select and split a demographic-stratified cohort without reading labels."""
     required = {"mesaid", "match5", "havepsg5", "haveact5", "race1c", "gender1", "sleepage5c"}
@@ -75,7 +76,10 @@ def select_expansion_cohort(
     valid_flags = (frame[["match5", "havepsg5", "haveact5"]].fillna(0).astype(int) == 1).all(axis=1)
     complete_files = frame["subject_id"].map(lambda subject: set(catalogs.get(subject, {})) == set(PERMITTED_PATHS))
     complete_demographics = frame[["race1c", "gender1", "sleepage5c"]].notna().all(axis=1)
-    frame = frame[valid_flags & complete_files & complete_demographics & ~frame["subject_id"].isin(excluded_ids)].copy()
+    eligible = True if eligible_ids is None else frame["subject_id"].isin(eligible_ids)
+    frame = frame[
+        valid_flags & complete_files & complete_demographics & eligible & ~frame["subject_id"].isin(excluded_ids)
+    ].copy()
     if len(frame) < count:
         raise ValueError(f"only {len(frame)} eligible independent MESA participants are available")
     frame["age_band"] = frame["sleepage5c"].astype(float).map(_age_band)
