@@ -80,17 +80,17 @@ def _validate_overlap_time(row) -> None:
         raise ValueError("overlap linetime does not match rounded PSG start time")
 
 
-def prepare_mesa_pilot(
+def _prepare_mesa_cohort(
     mesa_root: Path,
-    pilot_manifest: Path,
+    pilot: pd.DataFrame,
     overlap_csv: Path,
     output_dir: Path,
+    allocation: dict[str, list[str]],
     seed: int = 20260915,
 ) -> tuple[pd.DataFrame, dict]:
-    """Validate and prepare the checksum-backed 24-participant MESA pilot."""
+    """Validate and prepare a checksum-backed MESA cohort."""
     mesa_root = Path(mesa_root)
-    pilot = pd.read_csv(pilot_manifest)
-    allocation = stratified_pilot_split(pilot, seed)
+    pilot = pilot.copy()
     pilot["subject_id"] = pilot["mesaid"].map(lambda value: f"{int(value):04d}")
 
     overlap = pd.read_csv(overlap_csv)
@@ -193,6 +193,65 @@ def prepare_mesa_pilot(
     (output_dir / "splits.json").write_text(json.dumps(allocation, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (output_dir / "dataset_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return epochs, manifest
+
+
+def prepare_mesa_pilot(
+    mesa_root: Path,
+    pilot_manifest: Path,
+    overlap_csv: Path,
+    output_dir: Path,
+    seed: int = 20260915,
+) -> tuple[pd.DataFrame, dict]:
+    """Validate and prepare the checksum-backed 24-participant MESA pilot."""
+    pilot = pd.read_csv(pilot_manifest)
+    allocation = stratified_pilot_split(pilot, seed)
+    return _prepare_mesa_cohort(mesa_root, pilot, overlap_csv, output_dir, allocation, seed)
+
+
+def prepare_mesa_manifest(
+    mesa_root: Path,
+    cohort_manifest: Path,
+    overlap_csv: Path,
+    output_dir: Path,
+    seed: int = 20260916,
+) -> tuple[pd.DataFrame, dict]:
+    """Prepare a MESA cohort using the subject splits frozen in its manifest."""
+    cohort = pd.read_csv(cohort_manifest, dtype={"subject_id": str})
+    required = {
+        "mesaid",
+        "subject_id",
+        "split",
+        "actigraphy_path",
+        "actigraphy_md5",
+        "events_path",
+        "events_md5",
+        "rpoints_path",
+        "rpoints_md5",
+    }
+    missing = sorted(required - set(cohort.columns))
+    if missing:
+        raise ValueError(f"cohort manifest missing required columns: {missing}")
+    cohort["subject_id"] = cohort["mesaid"].map(lambda value: f"{int(value):04d}")
+    if cohort["subject_id"].duplicated().any() or cohort["mesaid"].duplicated().any():
+        raise ValueError("cohort manifest contains duplicate participants")
+    valid_splits = {"train", "validation", "test"}
+    invalid_splits = sorted(set(cohort["split"]) - valid_splits)
+    if invalid_splits:
+        raise ValueError(f"cohort manifest contains invalid split values: {invalid_splits}")
+    if set(cohort["split"]) != valid_splits:
+        raise ValueError("cohort manifest must contain train, validation, and test splits")
+    allocation = {
+        split: sorted(cohort.loc[cohort["split"] == split, "subject_id"].tolist())
+        for split in ("train", "validation", "test")
+    }
+    cohort = cohort.rename(
+        columns={
+            "actigraphy_path": "actigraphy_file",
+            "events_path": "events_file",
+            "rpoints_path": "rpoints_file",
+        }
+    )
+    return _prepare_mesa_cohort(mesa_root, cohort, overlap_csv, output_dir, allocation, seed)
 
 
 def main() -> int:

@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from ml.mesa import MESA_FEATURE_COLUMNS
-from ml.prepare_mesa import prepare_mesa_pilot, stratified_pilot_split
+from ml.prepare_mesa import prepare_mesa_manifest, prepare_mesa_pilot, stratified_pilot_split
 
 
 def _pilot_frame() -> pd.DataFrame:
@@ -157,3 +157,52 @@ def test_prepare_mesa_pilot_rejects_checksum_mismatch_and_duplicate_mapping(tmp_
 
     with pytest.raises(ValueError, match="duplicate"):
         prepare_mesa_pilot(mesa_root, pilot_path, overlap_path, tmp_path / "bad-overlap")
+
+
+def test_prepare_mesa_manifest_preserves_frozen_subject_splits(tmp_path):
+    mesa_root, pilot_path, overlap_path = _write_pilot_source(tmp_path)
+    cohort = pd.read_csv(pilot_path)
+    allocation = stratified_pilot_split(cohort, seed=20260915)
+    reverse_split = {subject: split for split, subjects in allocation.items() for subject in subjects}
+    cohort["subject_id"] = cohort["mesaid"].map(lambda value: f"{int(value):04d}")
+    cohort["split"] = cohort["subject_id"].map(reverse_split)
+    cohort = cohort.rename(
+        columns={
+            "actigraphy_file": "actigraphy_path",
+            "events_file": "events_path",
+            "rpoints_file": "rpoints_path",
+        }
+    )
+    manifest_path = tmp_path / "expansion.csv"
+    cohort.to_csv(manifest_path, index=False)
+
+    epochs, manifest = prepare_mesa_manifest(mesa_root, manifest_path, overlap_path, tmp_path / "expanded")
+
+    observed = epochs.groupby("split")["subject_id"].unique().apply(lambda values: sorted(values)).to_dict()
+    assert observed == allocation
+    assert manifest["splits"] == allocation
+
+
+def test_prepare_mesa_manifest_rejects_invalid_or_duplicate_assignments(tmp_path):
+    mesa_root, pilot_path, overlap_path = _write_pilot_source(tmp_path)
+    cohort = pd.read_csv(pilot_path).rename(
+        columns={
+            "actigraphy_file": "actigraphy_path",
+            "events_file": "events_path",
+            "rpoints_file": "rpoints_path",
+        }
+    )
+    cohort["subject_id"] = cohort["mesaid"].map(lambda value: f"{int(value):04d}")
+    cohort["split"] = "train"
+    cohort.loc[0, "split"] = "future"
+    invalid_path = tmp_path / "invalid.csv"
+    cohort.to_csv(invalid_path, index=False)
+
+    with pytest.raises(ValueError, match="split"):
+        prepare_mesa_manifest(mesa_root, invalid_path, overlap_path, tmp_path / "invalid")
+
+    cohort.loc[0, "split"] = "train"
+    duplicate_path = tmp_path / "duplicate.csv"
+    pd.concat([cohort, cohort.iloc[[0]]], ignore_index=True).to_csv(duplicate_path, index=False)
+    with pytest.raises(ValueError, match="duplicate"):
+        prepare_mesa_manifest(mesa_root, duplicate_path, overlap_path, tmp_path / "duplicate")
