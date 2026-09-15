@@ -257,12 +257,17 @@ def prepare_mesa_manifest(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare aligned MESA pilot epochs")
     parser.add_argument("--mesa-root", type=Path, required=True)
-    parser.add_argument("--pilot-manifest", type=Path, required=True)
+    manifest = parser.add_mutually_exclusive_group(required=True)
+    manifest.add_argument("--pilot-manifest", type=Path)
+    manifest.add_argument("--cohort-manifest", type=Path)
     parser.add_argument("--overlap-csv", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=20260915)
     args = parser.parse_args()
-    prepare_mesa_pilot(args.mesa_root, args.pilot_manifest, args.overlap_csv, args.output_dir, args.seed)
+    if args.pilot_manifest:
+        prepare_mesa_pilot(args.mesa_root, args.pilot_manifest, args.overlap_csv, args.output_dir, args.seed)
+    else:
+        prepare_mesa_manifest(args.mesa_root, args.cohort_manifest, args.overlap_csv, args.output_dir, args.seed)
     return 0
 
 

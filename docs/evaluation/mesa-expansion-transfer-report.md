@@ -65,20 +65,21 @@ was evaluated once on the existing BIDSleep test participants.
 
 | Metric | BIDSleep-only | MESA pretrain + BIDSleep fine-tune |
 | --- | ---: | ---: |
-| Validation threshold | 0.3611 | 0.4447 |
-| Test F1 | 0.6393 | 0.6377 |
-| Test balanced accuracy | 0.5844 | 0.6168 |
-| Test ROC-AUC | 0.6385 | 0.6570 |
-| Test PR-AUC | 0.5606 | 0.5790 |
-| Test Brier score | 0.2435 | 0.2377 |
-| Participant-macro F1 | 0.6348 | 0.6330 |
-| Participant-macro balanced accuracy | 0.5841 | 0.6153 |
+| Validation threshold | 0.3611 | 0.3965 |
+| Test F1 | 0.6393 | 0.6435 |
+| Test balanced accuracy | 0.5844 | 0.6195 |
+| Test ROC-AUC | 0.6385 | 0.6637 |
+| Test PR-AUC | 0.5606 | 0.5831 |
+| Test Brier score | 0.2435 | 0.2352 |
+| Participant-macro F1 | 0.6348 | 0.6374 |
+| Participant-macro balanced accuracy | 0.5841 | 0.6170 |
 
-The paired nine-participant F1 delta (transfer minus control) was -0.0018, with
-a 10,000-resample paired bootstrap 95% interval of -0.0155 to 0.0130. Although
-balanced accuracy and calibration improved, the predeclared participant-macro F1
-criterion did not improve. Therefore transfer is **not promising** under the
-predeclared gate, and MESA remains a separate research benchmark.
+The paired nine-participant F1 delta (transfer minus control) was +0.0026, with
+a 10,000-resample paired bootstrap 95% interval of -0.0097 to 0.0152. Although
+the point estimates for macro F1, balanced accuracy, and calibration improved,
+the F1 interval includes harm and no demographic-subgroup conclusion is possible.
+Therefore transfer is **not promising** under the predeclared gate, and MESA
+remains a separate research benchmark.
 
 This comparison is exploratory because BIDSleep test results were previously
 known. MESA actigraphy is not Watch raw XYZ acceleration, MESA ECG R-points are

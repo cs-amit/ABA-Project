@@ -10,6 +10,7 @@ import pytest
 from ml.mesa_expansion import (
     build_file_catalog,
     download_expansion,
+    main,
     required_download_bytes,
     select_expansion_cohort,
 )
@@ -197,3 +198,22 @@ def test_download_expansion_rejects_manifest_path_traversal(tmp_path):
 
     with pytest.raises(ValueError, match="within"):
         download_expansion(manifest, tmp_path, token_path)
+
+
+def test_verify_cli_reports_zero_missing_bytes_for_checksum_valid_manifest(tmp_path, monkeypatch, capsys):
+    contents = {
+        "actigraphy": ("actigraphy/mesa-sleep-0001.csv", b"activity"),
+        "events": ("polysomnography/annotations-events-nsrr/mesa-sleep-0001-nsrr.xml", b"stages"),
+        "rpoints": ("polysomnography/annotations-rpoints/mesa-sleep-0001-rpoint.csv", b"beats"),
+    }
+    manifest = _download_manifest(contents)
+    manifest_path = tmp_path / "manifest.csv"
+    manifest.to_csv(manifest_path, index=False)
+    for path, body in contents.values():
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+    monkeypatch.setattr("sys.argv", ["mesa_expansion", "verify", "--manifest", str(manifest_path), "--root", str(tmp_path)])
+
+    assert main() == 0
+    assert '"missing_bytes": 0' in capsys.readouterr().out

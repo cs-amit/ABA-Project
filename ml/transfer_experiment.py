@@ -255,7 +255,10 @@ def run_transfer_experiment(
     transfer, transfer_history = train_common_cnn_gru(
         target_scaled[target_splits == "train"], target_y[target_splits == "train"],
         target_scaled[target_splits == "validation"], target_y[target_splits == "validation"],
-        seed=seed + 2, max_epochs=20, patience=5, initial_state=pretrained.state_dict(),
+        # Hold BIDSleep shuffling and optimizer randomness constant between the
+        # control and fine-tuning conditions; the only intended difference is
+        # the pretrained MESA initialization.
+        seed=seed + 1, max_epochs=20, patience=5, initial_state=pretrained.state_dict(),
     )
     validation_mask = target_splits == "validation"
     test_mask = target_splits == "test"

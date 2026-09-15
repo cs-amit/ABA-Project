@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import argparse
 import hashlib
+import json
 from pathlib import Path
 import re
 import shutil
@@ -225,3 +227,55 @@ def download_expansion(
         "skipped": skipped,
         "bytes_downloaded": sum(result["bytes"] for result in results),
     }
+
+
+def main() -> int:
+    """Provide reproducible catalog, selective download, and audit commands."""
+    parser = argparse.ArgumentParser(description="Select and selectively download MESA expansion files")
+    commands = parser.add_subparsers(dest="command", required=True)
+    catalog = commands.add_parser("catalog", help="select a cohort from saved official metadata")
+    catalog.add_argument("--metadata-json", type=Path, required=True, help="JSON list of official file metadata records")
+    catalog.add_argument("--phenotype", type=Path, required=True)
+    catalog.add_argument("--pilot-manifest", type=Path, required=True)
+    catalog.add_argument("--overlap-csv", type=Path, required=True)
+    catalog.add_argument("--output", type=Path, required=True)
+    catalog.add_argument("--count", type=int, default=500)
+    catalog.add_argument("--seed", type=int, default=20260916)
+    download = commands.add_parser("download", help="checksum-download only manifest files")
+    download.add_argument("--manifest", type=Path, required=True)
+    download.add_argument("--root", type=Path, required=True)
+    download.add_argument("--token-path", type=Path, required=True)
+    download.add_argument("--workers", type=int, default=8)
+    verify = commands.add_parser("verify", help="verify all manifest files without network access")
+    verify.add_argument("--manifest", type=Path, required=True)
+    verify.add_argument("--root", type=Path, required=True)
+    args = parser.parse_args()
+    if args.command == "catalog":
+        entries = json.loads(args.metadata_json.read_text(encoding="utf-8"))
+        if not isinstance(entries, list):
+            raise ValueError("metadata JSON must be a list of official file records")
+        pilot = pd.read_csv(args.pilot_manifest)
+        overlap = pd.read_csv(args.overlap_csv)
+        cohort = select_expansion_cohort(
+            pd.read_csv(args.phenotype),
+            build_file_catalog(entries),
+            set(pilot["mesaid"].map(lambda value: f"{int(value):04d}")),
+            count=args.count,
+            seed=args.seed,
+            eligible_ids=set(overlap["mesaid"].map(lambda value: f"{int(value):04d}")),
+        )
+        write_expansion_manifest(cohort, args.output)
+        print(f"selected={len(cohort)} output={args.output}")
+    elif args.command == "download":
+        result = download_expansion(pd.read_csv(args.manifest), args.root, args.token_path, args.workers)
+        print(json.dumps(result, sort_keys=True))
+    else:
+        missing = required_download_bytes(pd.read_csv(args.manifest), args.root)
+        print(json.dumps({"missing_bytes": missing}, sort_keys=True))
+        if missing:
+            return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
