@@ -2,22 +2,54 @@
 
 ## Status
 
-No trained model is bundled yet. BIDSleep has not been downloaded or used.
-Task 8 training requires Task 7's externally stored, permitted preparation
-artifacts: `epochs.parquet`, `splits.json`, and `dataset_manifest.json`.
+No trained model is bundled in the Android application. Two experimental
+dataset-specific results are available: the completed BIDSleep causal-time
+logistic benchmark (test F1 0.6409) and the MESA pilot described below. Their
+scores are not a head-to-head model comparison because the cohorts, sensors,
+feature schemas, and held-out participants differ.
 
 ## Intended use
 
-The eventual model estimates likely light sleep from the preceding ten causal
+The experimental models estimate likely light sleep from the preceding ten causal
 30-second wearable feature epochs. It is a wellness estimate only, not a
 sleep-stage diagnosis or a disorder assessment. The phone fallback alarm is
 independent of inference and always remains available.
 
-## Data and limitations
+## MESA pilot data
 
-The planned primary source is BIDSleep. Its Apple Watch signals and healthy
-participant population do not establish performance for Galaxy Watch users or
-people with sleep disorders. MESA is not used by this project and remains an
-optional future comparison only. The final exported-model section is written
-only after a reproducible permitted-data run records its exact manifest,
-subject-held-out split, seed, metrics, selection rationale, and ONNX parity.
+- Dataset: MESA Sleep release 0.8.0.
+- Pilot: 24 stratified participants and 31,274 labelled epochs.
+- Split: 16 train, 4 validation, and 4 test participants; seed 20260915.
+- Inputs: 30-second activity count and availability, off-wrist state,
+  ECG-R-point-derived HR/IBI features, elapsed time, and clock encodings.
+- Labels: PSG stages 1/2 are light; wake, stages 3/4, and REM are not-light.
+- Alignment: official MESA PSG/actigraphy overlap line; no clock-time guessing.
+- Model: train-standardised, class-balanced logistic regression over ten causal
+  epochs; threshold 0.504522 selected on validation participants only.
+
+## Frozen pilot result
+
+| Metric | Test value |
+| --- | ---: |
+| Accuracy | 0.7628 |
+| Balanced accuracy | 0.7638 |
+| Precision | 0.6996 |
+| Recall | 0.9158 |
+| F1 | 0.7932 |
+| ROC-AUC | 0.8193 |
+| PR-AUC | 0.7391 |
+| Brier score | 0.1640 |
+
+Test prevalence was 0.4967. The always-light baseline had F1 0.6637 and
+balanced accuracy 0.5000; always-rest had F1 0 and balanced accuracy 0.5000.
+The four test participants had individual F1 values from 0.7289 to 0.8424.
+
+## Limitations
+
+This is an exploratory 24-participant result and does not establish an F1
+improvement for the deployed Galaxy Watch model. MESA actigraphy provides
+activity counts rather than raw XYZ acceleration, its ECG differs from Watch
+PPG, and its older cardiovascular cohort may not represent intended users.
+The strong MESA result justifies a larger selectively downloaded comparison;
+it does not justify pooling MESA and BIDSleep without harmonisation. No MESA
+model has been exported to ONNX or bundled in the app.

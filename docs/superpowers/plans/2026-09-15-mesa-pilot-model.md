@@ -214,7 +214,7 @@ git commit -m "feat: evaluate MESA pilot baseline"
 ### Task 4: Acquire mapping and run the pilot
 
 **Files:**
-- Ignored input: `data/mesa/mesa/actigraphy/mesa-actigraphy-psg-overlap.csv`
+- Ignored input: `data/mesa/mesa/overlap/mesa-actigraphy-psg-overlap.csv`
 - Ignored outputs: `ml/artifacts/mesa_pilot/`
 
 - [ ] **Step 1: Download only the overlap CSV**
@@ -228,7 +228,7 @@ Require columns `mesaid,line,linetime,starttime_psg`, one row for each of 24 IDs
 - [ ] **Step 3: Prepare the pilot**
 
 ```powershell
-C:\Users\AMIT\anaconda3\envs\fashion-trends\python.exe -m ml.prepare_mesa --mesa-root data/mesa/mesa --pilot-manifest data/mesa/pilot_subjects.csv --overlap-csv data/mesa/mesa/actigraphy/mesa-actigraphy-psg-overlap.csv --output-dir ml/artifacts/mesa_pilot --seed 20260915
+C:\Users\AMIT\anaconda3\envs\fashion-trends\python.exe -m ml.prepare_mesa --mesa-root data/mesa/mesa --pilot-manifest data/mesa/pilot_subjects.csv --overlap-csv data/mesa/mesa/overlap/mesa-actigraphy-psg-overlap.csv --output-dir ml/artifacts/mesa_pilot --seed 20260915
 ```
 
 Expected: 24 participants, nonzero rows and both labels in every split, and zero checksum/alignment failures.

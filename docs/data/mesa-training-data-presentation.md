@@ -11,7 +11,7 @@
 - Deployment target: Samsung Galaxy Watch4 accelerometer, heart rate, and inter-beat interval (IBI) data.
 - Important: this is a wellness estimate, not a clinical diagnosis.
 
-# Proposed dataset: MESA Sleep
+# Evaluated pilot dataset: MESA Sleep
 
 ## Why MESA Sleep?
 
@@ -53,7 +53,7 @@ Source: [MESA PSG documentation](https://sleepdata.org/datasets/mesa/pages/polys
 1. Keep only participants with valid concurrent PSG and actigraphy.
 2. Use the MESA `match5` alignment flag to identify concurrent recordings.
 3. Align PSG stage annotations to 30-second actigraphy epochs.
-4. Extract movement and cardiovascular features that match the Android feature contract.
+4. Extract a MESA-native common feature set without fabricating raw XYZ values.
 5. Exclude invalid/off-wrist epochs and record all exclusions.
 
 The documented concurrent PSG/actigraphy subset contains **1,798** participants.
@@ -67,11 +67,14 @@ Source: [MESA `match5` variable](https://sleepdata.org/datasets/mesa/variables/m
 | Item | Decision |
 | --- | --- |
 | Positive label | PSG reference `LIGHT` sleep |
-| Negative label | Awake, deep, REM, unavailable, or excluded state |
+| Negative label | Awake, deep, or REM |
 | Epoch length | 30 seconds |
-| Feature families | Motion magnitude/activity, HR, IBI/HRV, valid-sample ratio, off-body state |
+| Feature families | Activity count, HR, IBI/HRV, availability, off-wrist state, causal time |
 | Split rule | Subject-level train/validation/test split; no participant appears in more than one split |
-| Models | Logistic-regression baseline, CNN-GRU, and CNN-LSTM |
+| Pilot model | Class-balanced logistic regression over ten causal epochs |
+
+Unknown, active, and unscored stages are excluded and counted rather than
+treated as negative examples.
 
 # Important limitations
 
@@ -80,16 +83,19 @@ Source: [MESA `match5` variable](https://sleepdata.org/datasets/mesa/variables/m
 - MESA devices are not identical to Galaxy Watch4 sensors: actigraphy is not raw three-axis Watch accelerometer data, and PSG ECG is not Watch PPG.
 - Therefore this is a feature-compatibility training approach, not sensor-equivalence proof.
 - PSG staging supplies reference labels; the deployed app still reports only a likely light-sleep wellness estimate.
-- Dataset access, licence/terms, files, and exact stage mapping must be verified before downloading or training.
+- The 24-participant pilot is exploratory; its result is not deployment accuracy.
 
 # Current status and next step
 
 ## Honest project status
 
-- Dataset choice: **MESA Sleep proposed and documented**.
-- Training data: **not downloaded or used yet**.
-- Required next action: submit/complete the NSRR data-access request, record access date and terms, then verify files and label definitions.
-- Development next: finish Task 6's exact Android feature contract, then implement the reproducible MESA preprocessing pipeline and subject-level split.
+- Access is approved and the release 0.8.0 pilot is checksum-verified.
+- The selected files total about 127 MiB; no EDF files were downloaded.
+- The adapter aligned 31,274 epochs from 24 participants with zero duplicate keys or split leakage.
+- Activity was observed in 98.7% of aligned epochs and cardiac data in 88.6%.
+- The deterministic split contains 16 train, 4 validation, and 4 test participants (seed 20260915).
+- Frozen test F1 is **0.7932** and balanced accuracy is **0.7638**, compared with always-light F1 0.6637 and balanced accuracy 0.5000.
+- Next: selectively expand the same three small modalities and overlap mapping to a larger participant cohort, then test harmonisation or transfer to the Watch-compatible BIDSleep feature path.
 
 # References
 
