@@ -29,3 +29,11 @@ The pilot uses seed 20260915 and a deterministic 16/4/4 participant split.
 Training-only standardisation and model fitting are followed by validation-only
 threshold selection and one frozen test evaluation. Samsung Health stages are
 not ground-truth training labels.
+
+The expanded MESA study uses seed `20260916`, 500 participants (350/75/75
+train/validation/test), and only actigraphy CSV, NSRR PSG-event XML, and ECG
+R-point CSV sources. Selection is demographic-only after excluding the pilot and
+requiring the official overlap mapping; all selected sources are size/MD5 checked
+and no EDF files are used. The resulting MESA-native benchmark and exploratory
+BIDSleep transfer comparison are recorded in
+`docs/evaluation/mesa-expansion-transfer-report.md`.

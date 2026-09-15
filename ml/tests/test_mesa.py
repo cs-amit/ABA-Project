@@ -109,17 +109,24 @@ def test_derive_cardiac_epochs_does_not_bridge_across_an_abnormal_beat():
     assert cardiac.loc[0, "heart_rate_mean"] == 0.0
 
 
+def test_derive_cardiac_epochs_sorts_unordered_source_rows_by_recording_time():
+    ordered = pd.DataFrame({"epoch": [1, 1, 1, 1], "seconds": [1.0, 2.0, 3.1, 4.3], "Type": [1, 1, 1, 1]})
+    unordered = ordered.iloc[[2, 0, 3, 1]].reset_index(drop=True)
+
+    assert derive_cardiac_epochs(unordered, epoch_count=1).equals(derive_cardiac_epochs(ordered, epoch_count=1))
+
+
 @pytest.mark.parametrize(
-    "rpoints, message",
+    "rpoints, epoch_count, message",
     [
-        (pd.DataFrame({"epoch": [1], "seconds": [0.0], "Type": [1]}), "positive"),
-        (pd.DataFrame({"epoch": [1, 1], "seconds": [2.0, 1.0], "Type": [1, 1]}), "sorted"),
-        (pd.DataFrame({"epoch": [2], "seconds": [1.0], "Type": [1]}), "epoch"),
+        (pd.DataFrame({"epoch": [1], "seconds": [0.0], "Type": [1]}), 1, "positive"),
+        (pd.DataFrame({"epoch": [2], "seconds": [30.0], "Type": [1]}), 2, "declared epoch"),
+        (pd.DataFrame({"epoch": [2], "seconds": [1.0], "Type": [1]}), 1, "epoch"),
     ],
 )
-def test_derive_cardiac_epochs_rejects_invalid_positions(rpoints, message):
+def test_derive_cardiac_epochs_rejects_invalid_positions(rpoints, epoch_count, message):
     with pytest.raises(ValueError, match=message):
-        derive_cardiac_epochs(rpoints, epoch_count=1)
+        derive_cardiac_epochs(rpoints, epoch_count=epoch_count)
 
 
 def _alignment_inputs():

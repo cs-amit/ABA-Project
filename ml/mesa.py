@@ -82,11 +82,18 @@ def derive_cardiac_epochs(rpoints: pd.DataFrame, epoch_count: int) -> pd.DataFra
         raise ValueError("R-point epoch and seconds must be numeric")
     if (frame["seconds"] <= 0).any():
         raise ValueError("R-point seconds must be positive")
-    if not frame["seconds"].is_monotonic_increasing:
-        raise ValueError("R-point seconds must be sorted")
     if (frame["epoch"] % 1 != 0).any() or not frame["epoch"].between(1, epoch_count).all():
         raise ValueError("R-point epoch must be an integer within the PSG epoch range")
     frame["epoch"] = frame["epoch"].astype(int)
+    # R-point epoch numbers use right-closed 30-second bins: a beat exactly
+    # at 30 seconds belongs to epoch one, not epoch two.
+    declared_epoch = np.ceil(frame["seconds"] / 30.0).astype(int)
+    if not np.array_equal(frame["epoch"].to_numpy(), declared_epoch.to_numpy()):
+        raise ValueError("R-point seconds must fall within the declared epoch")
+    # Some NSRR exports are grouped in source chunks rather than chronological
+    # order. Seconds is recording-relative time, so restore temporal adjacency
+    # before calculating consecutive-beat intervals.
+    frame = frame.sort_values("seconds", kind="stable").reset_index(drop=True)
 
     totals = frame.groupby("epoch").size()
     normal_counts = frame[frame["Type"] == 1].groupby("epoch").size()

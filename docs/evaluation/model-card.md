@@ -53,3 +53,13 @@ PPG, and its older cardiovascular cohort may not represent intended users.
 The strong MESA result justifies a larger selectively downloaded comparison;
 it does not justify pooling MESA and BIDSleep without harmonisation. No MESA
 model has been exported to ONNX or bundled in the app.
+
+## MESA expansion and transfer outcome
+
+The completed 500-participant MESA benchmark and exploratory shared-feature
+transfer comparison are documented in
+[`mesa-expansion-transfer-report.md`](mesa-expansion-transfer-report.md).
+The MESA-native test F1 was 0.6925, but MESA pretraining did not improve the
+predeclared BIDSleep participant-macro F1 criterion (0.6330 versus 0.6348 for
+BIDSleep-only). MESA is therefore retained as a separate research benchmark;
+there is no claim of Galaxy Watch or deployment improvement.
