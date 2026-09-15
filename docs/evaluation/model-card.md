@@ -25,24 +25,24 @@ independent of inference and always remains available.
 - Labels: PSG stages 1/2 are light; wake, stages 3/4, and REM are not-light.
 - Alignment: official MESA PSG/actigraphy overlap line; no clock-time guessing.
 - Model: train-standardised, class-balanced logistic regression over ten causal
-  epochs; threshold 0.504522 selected on validation participants only.
+  epochs; threshold 0.506699 selected on validation participants only.
 
 ## Frozen pilot result
 
 | Metric | Test value |
 | --- | ---: |
-| Accuracy | 0.7628 |
-| Balanced accuracy | 0.7638 |
-| Precision | 0.6996 |
-| Recall | 0.9158 |
-| F1 | 0.7932 |
-| ROC-AUC | 0.8193 |
-| PR-AUC | 0.7391 |
-| Brier score | 0.1640 |
+| Accuracy | 0.7686 |
+| Balanced accuracy | 0.7695 |
+| Precision | 0.7062 |
+| Recall | 0.9145 |
+| F1 | 0.7970 |
+| ROC-AUC | 0.8160 |
+| PR-AUC | 0.7254 |
+| Brier score | 0.1634 |
 
 Test prevalence was 0.4967. The always-light baseline had F1 0.6637 and
 balanced accuracy 0.5000; always-rest had F1 0 and balanced accuracy 0.5000.
-The four test participants had individual F1 values from 0.7289 to 0.8424.
+The four test participants had individual F1 values from 0.7368 to 0.8466.
 
 ## Limitations
 

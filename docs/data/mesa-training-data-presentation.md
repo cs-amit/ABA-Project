@@ -94,7 +94,7 @@ treated as negative examples.
 - The adapter aligned 31,274 epochs from 24 participants with zero duplicate keys or split leakage.
 - Activity was observed in 98.7% of aligned epochs and cardiac data in 88.6%.
 - The deterministic split contains 16 train, 4 validation, and 4 test participants (seed 20260915).
-- Frozen test F1 is **0.7932** and balanced accuracy is **0.7638**, compared with always-light F1 0.6637 and balanced accuracy 0.5000.
+- Frozen test F1 is **0.7970** and balanced accuracy is **0.7695**, compared with always-light F1 0.6637 and balanced accuracy 0.5000.
 - Next: selectively expand the same three small modalities and overlap mapping to a larger participant cohort, then test harmonisation or transfer to the Watch-compatible BIDSleep feature path.
 
 # References
