@@ -12,4 +12,7 @@ ml/tests/__pycache__/
 *.py[cod]
 /.kotlin/
 /.physionet-netrc
+/.nsrr-token
+/data/mesa/
 *.hprof
+/.worktrees/
