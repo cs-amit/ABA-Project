@@ -15,7 +15,6 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from .mesa_baseline import select_validation_threshold
 from .metrics import evaluate_binary_probabilities
 from .models import CnnGru
 from .transfer_features import (
@@ -56,6 +55,65 @@ def _predict(model: CnnGru, values: np.ndarray, batch_size: int = 1024) -> np.nd
     return np.concatenate(outputs) if outputs else np.empty(0, dtype=np.float32)
 
 
+def _subject_array(subjects: np.ndarray | None, length: int) -> np.ndarray:
+    values = np.zeros(length, dtype=np.int64) if subjects is None else np.asarray(subjects)
+    if values.ndim != 1 or len(values) != length or pd.isna(values).any():
+        raise ValueError("subjects must contain one nonmissing ID per sequence")
+    return values.astype(str)
+
+
+def equal_subject_loss_weights(labels: np.ndarray, subjects: np.ndarray) -> np.ndarray:
+    """Class-weighted loss coefficients with equal total mass per participant.
+
+    Normalize after class weighting, so different participant prevalences cannot
+    undo equal participant mass. The returned weights have global mean one.
+    """
+    labels = np.asarray(labels)
+    if labels.ndim != 1 or not len(labels) or set(np.unique(labels)) != {0, 1}:
+        raise ValueError("training labels must be a non-empty binary array with both classes")
+    subjects = _subject_array(subjects, len(labels))
+    positive_weight = np.sum(labels == 0) / np.sum(labels == 1)
+    weights = np.where(labels == 1, positive_weight, 1.0)
+    _, inverse = np.unique(subjects, return_inverse=True)
+    totals = np.bincount(inverse, weights=weights)
+    return (weights / totals[inverse] * len(labels) / len(totals)).astype(np.float32)
+
+
+def select_participant_macro_threshold(
+    labels: np.ndarray, probabilities: np.ndarray, subjects: np.ndarray
+) -> tuple[float, float]:
+    """Maximize validation participant-macro F1, resolving ties near 0.5.
+
+    Sweep distinct predicted probabilities in descending order. Each subject's
+    F1 increments are accumulated once, avoiding a threshold-by-row matrix.
+    """
+    labels = np.asarray(labels)
+    probabilities = np.asarray(probabilities, dtype=np.float64)
+    if (labels.ndim != 1 or probabilities.ndim != 1 or not len(labels)
+            or len(labels) != len(probabilities) or not np.isin(labels, [0, 1]).all()
+            or not np.isfinite(probabilities).all() or ((probabilities < 0) | (probabilities > 1)).any()):
+        raise ValueError("validation requires aligned binary labels and finite probabilities in [0, 1]")
+    subjects = _subject_array(subjects, len(labels))
+    order = np.argsort(-probabilities, kind="stable")
+    ordered_labels, ordered_subjects = labels[order], subjects[order]
+    deltas = np.zeros(len(labels), dtype=np.float64)
+    unique_subjects = np.unique(subjects)
+    for subject in unique_subjects:
+        positions = np.flatnonzero(ordered_subjects == subject)
+        subject_labels = ordered_labels[positions]
+        true_positive = np.cumsum(subject_labels)
+        denominator = np.arange(1, len(positions) + 1) + subject_labels.sum()
+        scores = 2 * true_positive / denominator
+        deltas[positions] = np.diff(np.r_[0.0, scores]) / len(unique_subjects)
+    macro_scores = np.cumsum(deltas)
+    sorted_probabilities = probabilities[order]
+    ends = np.r_[np.flatnonzero(np.diff(sorted_probabilities) != 0), len(labels) - 1]
+    best = float(macro_scores[ends].max())
+    tied = ends[np.isclose(macro_scores[ends], best, rtol=0, atol=1e-12)]
+    selected = min(tied, key=lambda index: (abs(sorted_probabilities[index] - 0.5), sorted_probabilities[index]))
+    return float(sorted_probabilities[selected]), float(macro_scores[selected])
+
+
 def train_common_cnn_gru(
     train_x: np.ndarray,
     train_y: np.ndarray,
@@ -68,6 +126,10 @@ def train_common_cnn_gru(
     batch_size: int = 256,
     learning_rate: float = 0.001,
     initial_state: dict[str, torch.Tensor] | None = None,
+    train_subjects: np.ndarray | None = None,
+    validation_subjects: np.ndarray | None = None,
+    equal_subject_weighting: bool = True,
+    checkpoint_metric: str = "participant_macro_f1",
 ) -> tuple[CnnGru, dict]:
     """Train with validation-only early stopping and optional pretrained weights."""
     train_x = np.asarray(train_x, dtype=np.float32)
@@ -80,21 +142,36 @@ def train_common_cnn_gru(
         raise ValueError("training and validation data must be non-empty with two training classes")
     if max_epochs <= 0 or patience <= 0:
         raise ValueError("max_epochs and patience must be positive")
+    if (train_y.ndim != 1 or validation_y.ndim != 1 or len(train_y) != len(train_x)
+            or len(validation_y) != len(validation_x) or not np.isin(validation_y, [0, 1]).all()
+            or not np.isfinite(train_x).all() or not np.isfinite(validation_x).all()):
+        raise ValueError("inputs must be finite with one binary label per sequence")
+    train_subjects = _subject_array(train_subjects, len(train_x))
+    validation_subjects = _subject_array(validation_subjects, len(validation_x))
+    if checkpoint_metric not in {"participant_macro_f1", "pooled_f1_at_0_5"}:
+        raise ValueError("unsupported checkpoint_metric")
     _seed_everything(seed)
     model = CnnGru(train_x.shape[2], hidden_size=32)
     if initial_state is not None:
         model.load_state_dict(copy.deepcopy(initial_state))
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     positive_weight = float(np.sum(train_y == 0) / max(np.sum(train_y == 1), 1))
+    loss_weights = (equal_subject_loss_weights(train_y, train_subjects) if equal_subject_weighting
+                    else np.where(train_y == 1, positive_weight, 1.0).astype(np.float32))
     criterion = nn.BCELoss(reduction="none")
     generator = torch.Generator().manual_seed(seed)
     loader = DataLoader(
-        TensorDataset(torch.from_numpy(train_x), torch.from_numpy(train_y.astype(np.float32))),
+        TensorDataset(torch.from_numpy(train_x), torch.from_numpy(train_y.astype(np.float32)),
+                      torch.from_numpy(loss_weights)),
         batch_size=batch_size,
         shuffle=True,
         generator=generator,
     )
     best_f1 = -1.0
+    best_epoch = 0
+    best_threshold = 0.5
+    best_macro_f1 = -1.0
+    best_pooled_f1 = -1.0
     best_state = copy.deepcopy(model.state_dict())
     stale = 0
     epochs = []
@@ -102,10 +179,9 @@ def train_common_cnn_gru(
         model.train()
         running_loss = 0.0
         seen = 0
-        for features, labels in loader:
+        for features, labels, weights in loader:
             optimizer.zero_grad()
             probabilities = model(features).squeeze(1)
-            weights = torch.where(labels == 1, positive_weight, 1.0)
             loss = (criterion(probabilities, labels) * weights).mean()
             loss.backward()
             optimizer.step()
@@ -113,9 +189,18 @@ def train_common_cnn_gru(
             seen += len(features)
         validation_probabilities = _predict(model, validation_x)
         validation_f1 = float(f1_score(validation_y, validation_probabilities >= 0.5, zero_division=0))
-        epochs.append({"epoch": epoch + 1, "train_loss": running_loss / seen, "validation_f1_at_0_5": validation_f1})
-        if validation_f1 > best_f1 + 1e-12:
-            best_f1 = validation_f1
+        threshold, macro_f1 = select_participant_macro_threshold(
+            validation_y, validation_probabilities, validation_subjects)
+        score = macro_f1 if checkpoint_metric == "participant_macro_f1" else validation_f1
+        epochs.append({"epoch": epoch + 1, "train_loss": running_loss / seen,
+                       "validation_f1_at_0_5": validation_f1,
+                       "validation_participant_macro_f1": macro_f1, "validation_threshold": threshold})
+        if score > best_f1 + 1e-12:
+            best_f1 = score
+            best_epoch = epoch + 1
+            best_threshold = threshold
+            best_macro_f1 = macro_f1
+            best_pooled_f1 = validation_f1
             best_state = copy.deepcopy(model.state_dict())
             stale = 0
         else:
@@ -128,7 +213,14 @@ def train_common_cnn_gru(
         "seed": seed,
         "initial_state_loaded": initial_state is not None,
         "epochs": epochs,
-        "best_validation_f1_at_0_5": best_f1,
+        "checkpoint_metric": checkpoint_metric,
+        "equal_subject_weighting": equal_subject_weighting,
+        "train_subject_count": len(np.unique(train_subjects)),
+        "validation_subject_count": len(np.unique(validation_subjects)),
+        "best_epoch": best_epoch,
+        "best_validation_threshold": best_threshold,
+        "best_validation_participant_macro_f1": best_macro_f1,
+        "best_validation_f1_at_0_5": best_pooled_f1,
     }
 
 
@@ -203,15 +295,19 @@ def _condition_report(
     test_x: np.ndarray,
     test_y: np.ndarray,
     test_subjects: np.ndarray,
+    validation_subjects: np.ndarray,
 ) -> tuple[dict, pd.DataFrame]:
     validation_probabilities = _predict(model, validation_x)
-    threshold, validation_f1 = select_validation_threshold(validation_y, validation_probabilities)
+    threshold, validation_macro_f1 = select_participant_macro_threshold(
+        validation_y, validation_probabilities, validation_subjects)
+    validation_f1 = float(f1_score(validation_y, validation_probabilities >= threshold, zero_division=0))
     test_probabilities = _predict(model, test_x)
     metrics = evaluate_binary_probabilities(test_y, test_probabilities, threshold)
     per_subject = _per_subject(test_subjects, test_y, test_probabilities, threshold)
     report = {
         "validation_threshold": threshold,
         "validation_f1": validation_f1,
+        "validation_participant_macro_f1": validation_macro_f1,
         "test": metrics,
         "participant_macro_f1": float(per_subject["f1"].mean()),
         "participant_macro_balanced_accuracy": float(per_subject["balanced_accuracy"].mean()),
@@ -246,11 +342,15 @@ def run_transfer_experiment(
         mesa_scaled[mesa_splits == "train"], mesa_y[mesa_splits == "train"],
         mesa_scaled[mesa_splits == "validation"], mesa_y[mesa_splits == "validation"],
         seed=seed, max_epochs=30, patience=5,
+        train_subjects=mesa_subjects[mesa_splits == "train"],
+        validation_subjects=mesa_subjects[mesa_splits == "validation"],
     )
     control, control_history = train_common_cnn_gru(
         target_scaled[target_splits == "train"], target_y[target_splits == "train"],
         target_scaled[target_splits == "validation"], target_y[target_splits == "validation"],
         seed=seed + 1, max_epochs=20, patience=5,
+        train_subjects=target_subjects[target_splits == "train"],
+        validation_subjects=target_subjects[target_splits == "validation"],
     )
     transfer, transfer_history = train_common_cnn_gru(
         target_scaled[target_splits == "train"], target_y[target_splits == "train"],
@@ -259,16 +359,20 @@ def run_transfer_experiment(
         # control and fine-tuning conditions; the only intended difference is
         # the pretrained MESA initialization.
         seed=seed + 1, max_epochs=20, patience=5, initial_state=pretrained.state_dict(),
+        train_subjects=target_subjects[target_splits == "train"],
+        validation_subjects=target_subjects[target_splits == "validation"],
     )
     validation_mask = target_splits == "validation"
     test_mask = target_splits == "test"
     control_report, control_subjects = _condition_report(
         control, target_scaled[validation_mask], target_y[validation_mask],
         target_scaled[test_mask], target_y[test_mask], target_subjects[test_mask],
+        target_subjects[validation_mask],
     )
     transfer_report, transfer_subjects = _condition_report(
         transfer, target_scaled[validation_mask], target_y[validation_mask],
         target_scaled[test_mask], target_y[test_mask], target_subjects[test_mask],
+        target_subjects[validation_mask],
     )
     bootstrap = paired_subject_bootstrap(control_subjects, transfer_subjects, seed=seed)
     output_dir = Path(output_dir)

@@ -41,7 +41,7 @@ def adapt_mesa_common(frame: pd.DataFrame) -> pd.DataFrame:
     }
     _require(frame, required, "MESA")
     result = frame.loc[:, _IDENTITY_COLUMNS].copy()
-    result["activity_count"] = frame["activity_count"]
+    result["activity_count"] = np.log1p(frame["activity_count"].clip(lower=0))
     result["activity_availability"] = frame["activity_observed"]
     result["heart_rate_mean"] = frame["heart_rate_mean"]
     result["heart_rate_standard_deviation"] = frame["heart_rate_standard_deviation"]
@@ -74,7 +74,10 @@ def adapt_bidsleep_common(frame: pd.DataFrame) -> pd.DataFrame:
             if offset and start - starts[offset - 1] != 30:
                 session_start = start
             elapsed[positions[offset]] = (start - session_start) / 3600.0
-    angle = 2 * np.pi * (result["epoch_start_s"].to_numpy(dtype=np.float64) % 86400) / 86400
+    local = pd.to_datetime(result["epoch_start_s"], unit="s", utc=True).dt.tz_convert("America/New_York")
+    local_seconds = local.dt.hour * 3600 + local.dt.minute * 60 + local.dt.second
+    angle = 2 * np.pi * local_seconds.to_numpy(dtype=np.float64) / 86400
+    result["activity_count"] = np.log1p(result["activity_count"].clip(lower=0))
     result["activity_availability"] = result.pop("accel_valid_sample_ratio")
     result["heart_rate_availability"] = result.pop("heart_rate_valid_sample_ratio")
     result["elapsed_hours"] = elapsed
