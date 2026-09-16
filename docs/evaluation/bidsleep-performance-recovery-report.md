@@ -10,9 +10,12 @@ The hash was verified before any test signal or label was opened.
 
 The separate evaluator then created corrected features for exactly the nine
 locked test participants and evaluated the checkpoint once. A persistent start
-record and completed-evaluation flag make a second evaluation fail closed. No
-test row was used for feature/scaler fitting, checkpoint selection, threshold
-selection, candidate ranking, or retry decisions.
+record and separate completion record make a second evaluation fail closed;
+the immutable candidate-selection record is never rewritten. New selection
+records bind the complete train/validation/test allocation and the checkpoint
+and scaler bytes and parameters before any test data can be opened. No test row
+was used for feature/scaler fitting, checkpoint selection, threshold selection,
+candidate ranking, or retry decisions.
 
 ## Validation selection
 
@@ -37,7 +40,8 @@ validation-selected participant-macro-F1 objective.
 ## Frozen test result
 
 The corrected test artifact contained 36,365 labelled epochs and produced
-35,740 causal sequences. Light-sleep prevalence was 0.4583.
+35,740 causal sequences. Light-sleep prevalence across those evaluated causal
+sequences was 0.4583.
 
 | Metric | Test value |
 | --- | ---: |

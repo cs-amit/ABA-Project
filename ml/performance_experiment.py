@@ -70,18 +70,6 @@ def rank_validation_candidates(candidates: list[dict], baseline_name: str) -> tu
     return ranking, None
 
 
-def persist_frozen_candidate(candidate: dict, output_dir: Path | str) -> Path:
-    """Persist a one-time immutable selection record bound to checkpoint bytes."""
-    path = Path(output_dir) / "frozen_candidate.json"
-    checkpoint = Path(candidate["checkpoint_path"])
-    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
-    with path.open("x", encoding="utf-8") as stream:
-        json.dump({"candidate": candidate, "checkpoint_sha256": digest,
-                   "selection_split": "validation", "test_evaluated": False}, stream, indent=2, sort_keys=True)
-        stream.write("\n")
-    return path
-
-
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -90,9 +78,48 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _json_sha256(value: dict) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def persist_frozen_candidate(
+    candidate: dict, output_dir: Path | str, frozen_splits: dict | Path | str
+) -> Path:
+    """Persist an immutable selection bound to checkpoint, scaler, and subjects."""
+    path = Path(output_dir) / "frozen_candidate.json"
+    checkpoint = Path(candidate["checkpoint_path"]).resolve()
+    scaler_path = checkpoint.with_name(f"{candidate['name']}_scaler.joblib")
+    allocation = _read_frozen_splits(frozen_splits)
+    if candidate.get("participants") != {
+        split: allocation[split] for split in ("train", "validation")
+    }:
+        raise ValueError("candidate participants do not match the frozen allocation")
+    parameters = candidate.get("scaler")
+    if not isinstance(parameters, dict) or not {"type", "center", "scale"}.issubset(parameters):
+        raise ValueError("candidate scaler parameters are incomplete")
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"candidate checkpoint does not exist: {checkpoint}")
+    if not scaler_path.is_file():
+        raise FileNotFoundError(f"candidate scaler does not exist: {scaler_path}")
+    record = {
+        "candidate": candidate,
+        "checkpoint_sha256": _sha256(checkpoint),
+        "scaler": {"path": str(scaler_path), "sha256": _sha256(scaler_path),
+                   "parameters": parameters},
+        "selection_split": "validation",
+        "subject_allocation": allocation,
+        "subject_allocation_sha256": _json_sha256(allocation),
+    }
+    with path.open("x", encoding="utf-8") as stream:
+        json.dump(record, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+    return path
+
+
 def _load_frozen_evaluation_contract(
     frozen_candidate_path: Path | str, frozen_splits: dict | Path | str
-) -> tuple[Path, dict, dict, Path]:
+) -> tuple[Path, dict, dict, Path, object]:
     """Validate the immutable selection record before any test-data access."""
     frozen_path = Path(frozen_candidate_path).resolve()
     if not frozen_path.is_file():
@@ -100,14 +127,16 @@ def _load_frozen_evaluation_contract(
     frozen = json.loads(frozen_path.read_text(encoding="utf-8"))
     if frozen.get("selection_split") != "validation" or not isinstance(frozen.get("candidate"), dict):
         raise ValueError("invalid frozen candidate selection record")
-    if frozen.get("test_evaluated") is not False:
-        raise RuntimeError("frozen candidate test was already evaluated")
     candidate = frozen["candidate"]
     required = {"name", "checkpoint_path", "validation_threshold", "feature_columns",
                 "model_config", "participants"}
     if not required.issubset(candidate):
         raise ValueError("frozen candidate is missing its evaluation contract")
     allocation = _read_frozen_splits(frozen_splits)
+    frozen_allocation = frozen.get("subject_allocation")
+    if (frozen_allocation != allocation
+            or frozen.get("subject_allocation_sha256") != _json_sha256(allocation)):
+        raise ValueError("test subject allocation does not match the frozen selection record")
     if candidate["participants"] != {split: allocation[split] for split in ("train", "validation")}:
         raise ValueError("frozen candidate participants do not match the frozen allocation")
     checkpoint = Path(candidate["checkpoint_path"]).resolve()
@@ -119,13 +148,31 @@ def _load_frozen_evaluation_contract(
     threshold = candidate["validation_threshold"]
     if not isinstance(threshold, (int, float)) or not np.isfinite(threshold) or not 0 <= threshold <= 1:
         raise ValueError("frozen validation threshold must be finite and in [0, 1]")
-    return frozen_path, frozen, allocation, checkpoint
+    scaler_record = frozen.get("scaler")
+    if not isinstance(scaler_record, dict) or not {"path", "sha256", "parameters"}.issubset(scaler_record):
+        raise ValueError("frozen candidate scaler contract is incomplete")
+    if scaler_record["parameters"] != candidate.get("scaler"):
+        raise ValueError("frozen scaler parameters do not match the candidate")
+    scaler_path = Path(scaler_record["path"]).resolve()
+    if not scaler_path.is_file():
+        raise FileNotFoundError(f"frozen candidate scaler does not exist: {scaler_path}")
+    if _sha256(scaler_path) != scaler_record["sha256"]:
+        raise ValueError("frozen scaler SHA256 does not match the selection record")
+    import joblib
+    scaler = joblib.load(scaler_path)
+    parameters = scaler_record["parameters"]
+    if (type(scaler).__name__ != parameters.get("type")
+            or not np.array_equal(np.asarray(scaler.center_), np.asarray(parameters.get("center")))
+            or not np.array_equal(np.asarray(scaler.scale_), np.asarray(parameters.get("scale")))):
+        raise ValueError("loaded scaler parameters do not match the frozen selection record")
+    return frozen_path, frozen, allocation, checkpoint, scaler
 
 
 _FROZEN_EVALUATION_OUTPUT_NAMES = (
     "test_evaluation_started.json", "corrected_test_epochs.parquet",
     "frozen_test_predictions.npz", "frozen_test_participants.csv",
-    "frozen_test_evaluation.json", "frozen_candidate.onnx",
+    "frozen_test_evaluation.json", "test_evaluation_completed.json",
+    "frozen_candidate.onnx",
 )
 
 
@@ -140,13 +187,14 @@ def evaluate_frozen_candidate(
     exclusive start record is created. Once that record exists, retries are
     refused even if an earlier process stopped, keeping the test gate closed.
     """
-    frozen_path, frozen, allocation, checkpoint = _load_frozen_evaluation_contract(
+    frozen_path, frozen, allocation, checkpoint, scaler = _load_frozen_evaluation_contract(
         frozen_candidate_path, frozen_splits)
     output_dir = frozen_path.parent
     _require_ignored_output(output_dir, _FROZEN_EVALUATION_OUTPUT_NAMES)
     started_path = output_dir / "test_evaluation_started.json"
     result_path = output_dir / "frozen_test_evaluation.json"
-    if started_path.exists() or result_path.exists():
+    completed_path = output_dir / "test_evaluation_completed.json"
+    if started_path.exists() or result_path.exists() or completed_path.exists():
         raise RuntimeError("frozen candidate test evaluation already started")
 
     candidate = frozen["candidate"]
@@ -158,13 +206,13 @@ def evaluate_frozen_candidate(
         subject_path = (raw_root / subject).resolve()
         if subject_path.parent != raw_root or not subject_path.is_dir():
             raise ValueError(f"frozen test subject has no direct raw directory: {subject}")
-    scaler_path = checkpoint.with_name(f"{candidate['name']}_scaler.joblib")
-    if not scaler_path.is_file():
-        raise FileNotFoundError(f"frozen candidate scaler does not exist: {scaler_path}")
-
+    frozen_digest = _sha256(frozen_path)
     start_record = {
         "candidate": candidate["name"],
         "checkpoint_sha256": frozen["checkpoint_sha256"],
+        "frozen_candidate_sha256": frozen_digest,
+        "scaler_sha256": frozen["scaler"]["sha256"],
+        "subject_allocation_sha256": frozen["subject_allocation_sha256"],
         "test_subjects": test_subjects,
         "threshold": float(candidate["validation_threshold"]),
         "threshold_source": "frozen_validation",
@@ -186,7 +234,6 @@ def evaluate_frozen_candidate(
     frame = frame.sort_values(["subject_id", "epoch_start_s"], kind="stable").reset_index(drop=True)
     frame.to_parquet(output_dir / "corrected_test_epochs.parquet", index=False)
 
-    import joblib
     import torch
     from .export_onnx import export_model, verify_onnx_probabilities
     from .metrics import evaluate_binary_probabilities
@@ -205,7 +252,6 @@ def evaluate_frozen_candidate(
         raise ValueError("test sequences must contain every frozen test subject and no other split")
     if set(np.unique(labels)) != {0, 1}:
         raise ValueError("frozen test sequences must contain both classes")
-    scaler = joblib.load(scaler_path)
     scaled = _transform(scaler, sequences)
     model = CnnGru(len(COMMON_FEATURE_COLUMNS), hidden_size=int(model_config.get("hidden_size", 32)))
     model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
@@ -231,6 +277,7 @@ def evaluate_frozen_candidate(
         "test_subjects": test_subjects,
         "test_epoch_count": int(len(frame)),
         "test_sequence_count": int(len(sequences)),
+        "test_sequence_prevalence": float(labels.mean()),
         "unknown_stage_count": int(unknown),
         "threshold": threshold,
         "threshold_source": "frozen_validation",
@@ -254,13 +301,17 @@ def evaluate_frozen_candidate(
         "evaluated_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     write_manifest(result_path, report)
-    result_digest = _sha256(result_path)
-    updated = {**frozen, "test_evaluated": True,
-               "test_evaluation_sha256": result_digest,
-               "test_evaluation_path": str(result_path)}
-    temporary = frozen_path.with_name(f".{frozen_path.name}.tmp")
-    write_manifest(temporary, updated)
-    temporary.replace(frozen_path)
+    completion = {
+        "candidate": candidate["name"],
+        "frozen_candidate_path": str(frozen_path),
+        "frozen_candidate_sha256": frozen_digest,
+        "test_evaluation_path": str(result_path),
+        "test_evaluation_sha256": _sha256(result_path),
+        "completed_at_utc": report["evaluated_at_utc"],
+    }
+    with completed_path.open("x", encoding="utf-8") as stream:
+        json.dump(completion, stream, indent=2, sort_keys=True)
+        stream.write("\n")
     return report
 
 
@@ -415,10 +466,15 @@ def _run_validation_ladder(
            {**neural_config, "initial_checkpoint": str(output_dir / "mesa_pretrained.pt")}, history)
     ranking, selected = rank_validation_candidates(candidates, "native_logistic")
     if selected is not None:
-        persist_frozen_candidate(next(row for row in candidates if row["name"] == selected), output_dir)
+        persist_frozen_candidate(
+            next(row for row in candidates if row["name"] == selected), output_dir, allocation)
     report = {**configuration, "study_type": "exploratory", "selection_split": "validation",
               "baseline_rationale": "corrected native logistic on the same artifact; historical preprocessing differs",
-              "test_evaluated": False, "candidates": candidates, "ranking": ranking, "frozen_candidate": selected}
+              "test_evaluation_policy": {
+                  "performed_by_validation_runner": False,
+                  "completion_record": "test_evaluation_completed.json",
+              },
+              "candidates": candidates, "ranking": ranking, "frozen_candidate": selected}
     write_manifest(output_dir / "validation_report.json", report)
     return report
 

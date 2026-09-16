@@ -173,20 +173,33 @@ def test_ranking_uses_macro_and_advancement_enforces_all_three_limits():
     assert api.rank_validation_candidates(rows[:2], "native_logistic")[1] is None
 
 
-def test_freeze_persists_checkpoint_digest_and_refuses_overwrite(tmp_path):
+def test_freeze_persists_complete_allocation_checkpoint_and_scaler_contract(tmp_path):
     api = experiment_api()
     checkpoint = tmp_path / "candidate.pt"
     checkpoint.write_bytes(b"model bytes")
+    scaler = tmp_path / "chosen_scaler.joblib"
+    scaler.write_bytes(b"scaler bytes")
+    allocation = {"train": ["a"], "validation": ["b"], "test": ["c"]}
     selected = {**candidate("chosen", .7, .7, .7), "checkpoint_path": str(checkpoint),
                 "validation_threshold": .42, "feature_columns": ["f"],
-                "model_config": {"seed": 17}, "scaler": {"fit_split": "train"},
+                "model_config": {"seed": 17},
+                "scaler": {"type": "RobustScaler", "fit_split": "train",
+                           "center": [1.0], "scale": [2.0]},
                 "participants": {"train": ["a"], "validation": ["b"]}}
-    path = api.persist_frozen_candidate(selected, tmp_path)
+    path = api.persist_frozen_candidate(selected, tmp_path, allocation)
     result = json.loads(path.read_text())
     assert result["candidate"] == selected
     assert result["checkpoint_sha256"] == "9cb7487000bc86ac36ce83c4acfabe8878552be99572a6770f65ab1d048a5c48"
+    assert result["subject_allocation"] == allocation
+    assert result["subject_allocation_sha256"] == "82dbc2383196703442c7bed3725f76b9485a1c1dbe8cef8a058dfd564b899c3d"
+    assert result["scaler"] == {
+        "path": str(scaler),
+        "sha256": hashlib.sha256(b"scaler bytes").hexdigest(),
+        "parameters": selected["scaler"],
+    }
+    assert "test_evaluated" not in result
     with pytest.raises(FileExistsError):
-        api.persist_frozen_candidate(selected, tmp_path)
+        api.persist_frozen_candidate(selected, tmp_path, allocation)
 
 
 def test_runner_rejects_test_before_constructing_sequences(epochs, allocation, tmp_path, monkeypatch):
@@ -237,6 +250,11 @@ def test_small_ladder_saves_reproducible_validation_only_records(tmp_path, alloc
     assert report["baseline"] == "native_logistic"
     assert len(report["candidates"]) == 3
     assert report["selection_split"] == "validation"
+    assert report["test_evaluation_policy"] == {
+        "performed_by_validation_runner": False,
+        "completion_record": "test_evaluation_completed.json",
+    }
+    assert "test_evaluated" not in report
     for row in report["candidates"]:
         assert row["participants"] == {"train": ["Bidslab01"], "validation": ["Bidslab02"]}
         assert row["scaler"]["fit_split"] == "train"
@@ -269,10 +287,11 @@ def frozen_evaluation_fixture(tmp_path, allocation):
         "validation_threshold": .42,
         "feature_columns": COMMON_FEATURE_COLUMNS,
         "model_config": {"name": "causal_cnn_gru", "hidden_size": 32, "sequence_epochs": 10},
-        "scaler": {"fit_split": "train"},
+        "scaler": {"type": "RobustScaler", "fit_split": "train",
+                   "center": scaler.center_.tolist(), "scale": scaler.scale_.tolist()},
         "participants": {"train": allocation["train"], "validation": allocation["validation"]},
     }
-    experiment_api().persist_frozen_candidate(candidate, output)
+    experiment_api().persist_frozen_candidate(candidate, output, allocation)
     validation_sentinel = output / "validation_report.json"
     validation_sentinel.write_text('{"untouched": true}\n', encoding="utf-8")
 
@@ -332,9 +351,65 @@ def test_frozen_evaluator_refuses_absent_checkpoint_before_raw_access(tmp_path, 
     assert not (output / "test_evaluation_started.json").exists()
 
 
+def test_frozen_evaluator_refuses_changed_allocation_before_raw_access(tmp_path, allocation, monkeypatch):
+    raw, _, output, _ = frozen_evaluation_fixture(tmp_path, allocation)
+    changed = {**allocation, "test": ["Bidslab04"]}
+    api = experiment_api()
+    monkeypatch.setattr(api, "read_official_bidsleep_epochs",
+                        lambda *args, **kwargs: pytest.fail("raw test data was accessed"))
+    with pytest.raises(ValueError, match="allocation"):
+        api.evaluate_frozen_candidate(output / "frozen_candidate.json", raw, changed)
+    assert not (output / "test_evaluation_started.json").exists()
+
+
+def test_frozen_evaluator_refuses_changed_scaler_before_raw_access(tmp_path, allocation, monkeypatch):
+    raw, splits, output, _ = frozen_evaluation_fixture(tmp_path, allocation)
+    (output / "mesa_transfer_scaler.joblib").write_bytes(b"changed after freezing")
+    api = experiment_api()
+    monkeypatch.setattr(api, "read_official_bidsleep_epochs",
+                        lambda *args, **kwargs: pytest.fail("raw test data was accessed"))
+    with pytest.raises(ValueError, match="scaler SHA256"):
+        api.evaluate_frozen_candidate(output / "frozen_candidate.json", raw, splits)
+    assert not (output / "test_evaluation_started.json").exists()
+
+
+def test_frozen_evaluator_refuses_scaler_parameter_mismatch_before_raw_access(tmp_path, allocation, monkeypatch):
+    raw, splits, output, _ = frozen_evaluation_fixture(tmp_path, allocation)
+    path = output / "frozen_candidate.json"
+    frozen = json.loads(path.read_text())
+    frozen["scaler"]["parameters"]["center"][0] = 99.0
+    path.write_text(json.dumps(frozen), encoding="utf-8")
+    api = experiment_api()
+    monkeypatch.setattr(api, "read_official_bidsleep_epochs",
+                        lambda *args, **kwargs: pytest.fail("raw test data was accessed"))
+    with pytest.raises(ValueError, match="scaler parameters"):
+        api.evaluate_frozen_candidate(path, raw, splits)
+    assert not (output / "test_evaluation_started.json").exists()
+
+
+def test_frozen_evaluator_verifies_loaded_scaler_parameters_before_raw_access(tmp_path, allocation, monkeypatch):
+    from sklearn.preprocessing import RobustScaler
+    raw, splits, output, _ = frozen_evaluation_fixture(tmp_path, allocation)
+    scaler_path = output / "mesa_transfer_scaler.joblib"
+    changed = RobustScaler().fit(np.array([[10.0] * 8, [11.0] * 8], dtype=np.float32))
+    joblib.dump(changed, scaler_path)
+    frozen_path = output / "frozen_candidate.json"
+    frozen = json.loads(frozen_path.read_text())
+    frozen["scaler"]["sha256"] = hashlib.sha256(scaler_path.read_bytes()).hexdigest()
+    frozen_path.write_text(json.dumps(frozen), encoding="utf-8")
+    api = experiment_api()
+    monkeypatch.setattr(api, "read_official_bidsleep_epochs",
+                        lambda *args, **kwargs: pytest.fail("raw test data was accessed"))
+    with pytest.raises(ValueError, match="loaded scaler parameters"):
+        api.evaluate_frozen_candidate(frozen_path, raw, splits)
+    assert not (output / "test_evaluation_started.json").exists()
+
+
 def test_frozen_evaluator_evaluates_named_test_subjects_once_without_changing_validation(tmp_path, allocation):
     raw, splits, output, validation_sentinel = frozen_evaluation_fixture(tmp_path, allocation)
-    before = validation_sentinel.read_bytes()
+    validation_before = validation_sentinel.read_bytes()
+    frozen_path = output / "frozen_candidate.json"
+    frozen_before = frozen_path.read_bytes()
 
     report = experiment_api().evaluate_frozen_candidate(output / "frozen_candidate.json", raw, splits)
 
@@ -348,10 +423,11 @@ def test_frozen_evaluator_evaluates_named_test_subjects_once_without_changing_va
     assert len(report["calibration"]) > 0
     assert pd.read_parquet(output / "corrected_test_epochs.parquet").subject_id.unique().tolist() == allocation["test"]
     assert pd.read_csv(output / "frozen_test_participants.csv").subject_id.tolist() == allocation["test"]
-    assert validation_sentinel.read_bytes() == before
-    frozen = json.loads((output / "frozen_candidate.json").read_text())
-    assert frozen["test_evaluated"] is True
-    assert frozen["test_evaluation_sha256"] == hashlib.sha256(
+    assert validation_sentinel.read_bytes() == validation_before
+    assert frozen_path.read_bytes() == frozen_before
+    completion = json.loads((output / "test_evaluation_completed.json").read_text())
+    assert completion["frozen_candidate_sha256"] == hashlib.sha256(frozen_before).hexdigest()
+    assert completion["test_evaluation_sha256"] == hashlib.sha256(
         (output / "frozen_test_evaluation.json").read_bytes()).hexdigest()
     with pytest.raises(RuntimeError, match="already (started|evaluated)"):
         experiment_api().evaluate_frozen_candidate(output / "frozen_candidate.json", raw, splits)
