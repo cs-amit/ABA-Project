@@ -1,8 +1,10 @@
 import importlib
+import hashlib
 import json
 import subprocess
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import pytest
@@ -245,3 +247,111 @@ def test_small_ladder_saves_reproducible_validation_only_records(tmp_path, alloc
     assert json.loads((output / "validation_report.json").read_text())["ranking"] == report["ranking"]
     if report["frozen_candidate"] is None:
         assert not (output / "frozen_candidate.json").exists()
+
+
+def frozen_evaluation_fixture(tmp_path, allocation):
+    import torch
+    from sklearn.preprocessing import RobustScaler
+    from ml.models import CnnGru
+    from ml.transfer_features import COMMON_FEATURE_COLUMNS
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_text("artifacts/\n", encoding="utf-8")
+    output = tmp_path / "artifacts" / "frozen"
+    output.mkdir(parents=True)
+    checkpoint = output / "mesa_transfer.pt"
+    torch.save(CnnGru(len(COMMON_FEATURE_COLUMNS), hidden_size=32).state_dict(), checkpoint)
+    scaler = RobustScaler().fit(np.array([[0.0] * 8, [1.0] * 8], dtype=np.float32))
+    joblib.dump(scaler, output / "mesa_transfer_scaler.joblib")
+    candidate = {
+        **candidate_metrics("mesa_transfer", .7, .7, .7),
+        "checkpoint_path": str(checkpoint),
+        "validation_threshold": .42,
+        "feature_columns": COMMON_FEATURE_COLUMNS,
+        "model_config": {"name": "causal_cnn_gru", "hidden_size": 32, "sequence_epochs": 10},
+        "scaler": {"fit_split": "train"},
+        "participants": {"train": allocation["train"], "validation": allocation["validation"]},
+    }
+    experiment_api().persist_frozen_candidate(candidate, output)
+    validation_sentinel = output / "validation_report.json"
+    validation_sentinel.write_text('{"untouched": true}\n', encoding="utf-8")
+
+    raw = tmp_path / "raw"
+    night = raw / allocation["test"][0] / "1"
+    night.mkdir(parents=True)
+    starts = np.arange(12) * 30
+    motion_rows = []
+    for start in starts:
+        motion_rows.extend([
+            {"Timestamp": start, "x": 0, "y": 0, "z": 0},
+            {"Timestamp": start + 1, "x": 2, "y": 0, "z": 0},
+        ])
+    pd.DataFrame(motion_rows).to_csv(night / "motion.csv", index=False)
+    pd.DataFrame({"Timestamp": starts, "hr": 60 + np.arange(12) % 3}).to_csv(night / "hr.csv", index=False)
+    savemat(night / "labels.mat", {
+        "recStart": "1969-12-31 19:00:00",
+        "dreem_label": np.array([1, 0] * 6),
+    })
+    splits = tmp_path / "frozen_splits.json"
+    splits.write_text(json.dumps(allocation), encoding="utf-8")
+    return raw, splits, output, validation_sentinel
+
+
+def candidate_metrics(name, macro, pooled, balanced):
+    return {"name": name, "participant_macro_f1": macro, "pooled": {"f1": pooled},
+            "participant_macro_balanced_accuracy": balanced}
+
+
+def test_frozen_evaluator_refuses_missing_candidate_before_raw_access(tmp_path, allocation, monkeypatch):
+    api = experiment_api()
+    monkeypatch.setattr(api, "read_official_bidsleep_epochs",
+                        lambda *args, **kwargs: pytest.fail("raw test data was accessed"))
+    with pytest.raises(FileNotFoundError, match="frozen candidate"):
+        api.evaluate_frozen_candidate(tmp_path / "missing.json", tmp_path / "raw", allocation)
+
+
+def test_frozen_evaluator_refuses_changed_checkpoint_before_raw_access(tmp_path, allocation, monkeypatch):
+    raw, splits, output, _ = frozen_evaluation_fixture(tmp_path, allocation)
+    (output / "mesa_transfer.pt").write_bytes(b"changed after freezing")
+    api = experiment_api()
+    monkeypatch.setattr(api, "read_official_bidsleep_epochs",
+                        lambda *args, **kwargs: pytest.fail("raw test data was accessed"))
+    with pytest.raises(ValueError, match="SHA256"):
+        api.evaluate_frozen_candidate(output / "frozen_candidate.json", raw, splits)
+    assert not (output / "test_evaluation_started.json").exists()
+
+
+def test_frozen_evaluator_refuses_absent_checkpoint_before_raw_access(tmp_path, allocation, monkeypatch):
+    raw, splits, output, _ = frozen_evaluation_fixture(tmp_path, allocation)
+    (output / "mesa_transfer.pt").unlink()
+    api = experiment_api()
+    monkeypatch.setattr(api, "read_official_bidsleep_epochs",
+                        lambda *args, **kwargs: pytest.fail("raw test data was accessed"))
+    with pytest.raises(FileNotFoundError, match="frozen checkpoint"):
+        api.evaluate_frozen_candidate(output / "frozen_candidate.json", raw, splits)
+    assert not (output / "test_evaluation_started.json").exists()
+
+
+def test_frozen_evaluator_evaluates_named_test_subjects_once_without_changing_validation(tmp_path, allocation):
+    raw, splits, output, validation_sentinel = frozen_evaluation_fixture(tmp_path, allocation)
+    before = validation_sentinel.read_bytes()
+
+    report = experiment_api().evaluate_frozen_candidate(output / "frozen_candidate.json", raw, splits)
+
+    assert report["candidate"] == "mesa_transfer"
+    assert report["test_subjects"] == allocation["test"]
+    assert report["threshold_source"] == "frozen_validation"
+    assert report["threshold"] == .42
+    assert report["test_epoch_count"] == 12
+    assert report["test_sequence_count"] == 3
+    assert report["participant_macro_f1"] == report["per_subject_summary"]["macro_f1"]
+    assert len(report["calibration"]) > 0
+    assert pd.read_parquet(output / "corrected_test_epochs.parquet").subject_id.unique().tolist() == allocation["test"]
+    assert pd.read_csv(output / "frozen_test_participants.csv").subject_id.tolist() == allocation["test"]
+    assert validation_sentinel.read_bytes() == before
+    frozen = json.loads((output / "frozen_candidate.json").read_text())
+    assert frozen["test_evaluated"] is True
+    assert frozen["test_evaluation_sha256"] == hashlib.sha256(
+        (output / "frozen_test_evaluation.json").read_bytes()).hexdigest()
+    with pytest.raises(RuntimeError, match="already (started|evaluated)"):
+        experiment_api().evaluate_frozen_candidate(output / "frozen_candidate.json", raw, splits)

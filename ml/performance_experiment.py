@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -79,6 +80,188 @@ def persist_frozen_candidate(candidate: dict, output_dir: Path | str) -> Path:
                    "selection_split": "validation", "test_evaluated": False}, stream, indent=2, sort_keys=True)
         stream.write("\n")
     return path
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _load_frozen_evaluation_contract(
+    frozen_candidate_path: Path | str, frozen_splits: dict | Path | str
+) -> tuple[Path, dict, dict, Path]:
+    """Validate the immutable selection record before any test-data access."""
+    frozen_path = Path(frozen_candidate_path).resolve()
+    if not frozen_path.is_file():
+        raise FileNotFoundError(f"frozen candidate does not exist: {frozen_path}")
+    frozen = json.loads(frozen_path.read_text(encoding="utf-8"))
+    if frozen.get("selection_split") != "validation" or not isinstance(frozen.get("candidate"), dict):
+        raise ValueError("invalid frozen candidate selection record")
+    if frozen.get("test_evaluated") is not False:
+        raise RuntimeError("frozen candidate test was already evaluated")
+    candidate = frozen["candidate"]
+    required = {"name", "checkpoint_path", "validation_threshold", "feature_columns",
+                "model_config", "participants"}
+    if not required.issubset(candidate):
+        raise ValueError("frozen candidate is missing its evaluation contract")
+    allocation = _read_frozen_splits(frozen_splits)
+    if candidate["participants"] != {split: allocation[split] for split in ("train", "validation")}:
+        raise ValueError("frozen candidate participants do not match the frozen allocation")
+    checkpoint = Path(candidate["checkpoint_path"]).resolve()
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"frozen checkpoint does not exist: {checkpoint}")
+    expected_digest = frozen.get("checkpoint_sha256")
+    if not isinstance(expected_digest, str) or _sha256(checkpoint) != expected_digest:
+        raise ValueError("frozen checkpoint SHA256 does not match the selection record")
+    threshold = candidate["validation_threshold"]
+    if not isinstance(threshold, (int, float)) or not np.isfinite(threshold) or not 0 <= threshold <= 1:
+        raise ValueError("frozen validation threshold must be finite and in [0, 1]")
+    return frozen_path, frozen, allocation, checkpoint
+
+
+_FROZEN_EVALUATION_OUTPUT_NAMES = (
+    "test_evaluation_started.json", "corrected_test_epochs.parquet",
+    "frozen_test_predictions.npz", "frozen_test_participants.csv",
+    "frozen_test_evaluation.json", "frozen_candidate.onnx",
+)
+
+
+def evaluate_frozen_candidate(
+    frozen_candidate_path: Path | str,
+    raw_root: Path | str,
+    frozen_splits: dict | Path | str,
+) -> dict:
+    """Evaluate exactly one frozen candidate on exactly the frozen test subjects.
+
+    The checkpoint and complete evaluation contract are verified before an
+    exclusive start record is created. Once that record exists, retries are
+    refused even if an earlier process stopped, keeping the test gate closed.
+    """
+    frozen_path, frozen, allocation, checkpoint = _load_frozen_evaluation_contract(
+        frozen_candidate_path, frozen_splits)
+    output_dir = frozen_path.parent
+    _require_ignored_output(output_dir, _FROZEN_EVALUATION_OUTPUT_NAMES)
+    started_path = output_dir / "test_evaluation_started.json"
+    result_path = output_dir / "frozen_test_evaluation.json"
+    if started_path.exists() or result_path.exists():
+        raise RuntimeError("frozen candidate test evaluation already started")
+
+    candidate = frozen["candidate"]
+    test_subjects = allocation["test"]
+    if not test_subjects:
+        raise ValueError("frozen allocation has no test subjects")
+    raw_root = Path(raw_root).resolve()
+    for subject in test_subjects:
+        subject_path = (raw_root / subject).resolve()
+        if subject_path.parent != raw_root or not subject_path.is_dir():
+            raise ValueError(f"frozen test subject has no direct raw directory: {subject}")
+    scaler_path = checkpoint.with_name(f"{candidate['name']}_scaler.joblib")
+    if not scaler_path.is_file():
+        raise FileNotFoundError(f"frozen candidate scaler does not exist: {scaler_path}")
+
+    start_record = {
+        "candidate": candidate["name"],
+        "checkpoint_sha256": frozen["checkpoint_sha256"],
+        "test_subjects": test_subjects,
+        "threshold": float(candidate["validation_threshold"]),
+        "threshold_source": "frozen_validation",
+    }
+    with started_path.open("x", encoding="utf-8") as stream:
+        json.dump(start_record, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+
+    # No test label or signal is opened before the exclusive start record.
+    frame, unknown = read_official_bidsleep_epochs(raw_root, subjects=test_subjects)
+    frame["split"] = "test"
+    validate_epoch_frame(frame)
+    observed_subjects = sorted(frame["subject_id"].unique().tolist())
+    if observed_subjects != sorted(test_subjects):
+        raise ValueError("corrected test artifact does not contain exactly the frozen test subjects")
+    values = frame[["epoch_start_s", *FEATURE_COLUMNS]].to_numpy(dtype=float)
+    if not len(frame) or not np.isfinite(values).all():
+        raise ValueError("corrected test epochs must be non-empty and finite")
+    frame = frame.sort_values(["subject_id", "epoch_start_s"], kind="stable").reset_index(drop=True)
+    frame.to_parquet(output_dir / "corrected_test_epochs.parquet", index=False)
+
+    import joblib
+    import torch
+    from .export_onnx import export_model, verify_onnx_probabilities
+    from .metrics import evaluate_binary_probabilities
+    from .models import CnnGru
+    from .transfer_features import COMMON_FEATURE_COLUMNS, adapt_bidsleep_common, build_common_sequences
+    from .transfer_experiment import _calibration, _per_subject, _predict, _transform
+
+    if candidate["feature_columns"] != COMMON_FEATURE_COLUMNS:
+        raise ValueError("frozen neural candidate feature schema is unsupported")
+    model_config = candidate["model_config"]
+    if model_config.get("name") != "causal_cnn_gru" or model_config.get("sequence_epochs") != 10:
+        raise ValueError("frozen candidate architecture is unsupported")
+    common = adapt_bidsleep_common(frame)
+    sequences, labels, subjects, splits = build_common_sequences(common, sequence_epochs=10)
+    if not len(sequences) or set(splits) != {"test"} or sorted(set(subjects)) != sorted(test_subjects):
+        raise ValueError("test sequences must contain every frozen test subject and no other split")
+    if set(np.unique(labels)) != {0, 1}:
+        raise ValueError("frozen test sequences must contain both classes")
+    scaler = joblib.load(scaler_path)
+    scaled = _transform(scaler, sequences)
+    model = CnnGru(len(COMMON_FEATURE_COLUMNS), hidden_size=int(model_config.get("hidden_size", 32)))
+    model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True))
+    model.eval()
+    probabilities = _predict(model, scaled)
+    threshold = float(candidate["validation_threshold"])
+    pooled = evaluate_binary_probabilities(labels, probabilities, threshold)
+    per_subject = _per_subject(subjects, labels, probabilities, threshold)
+    per_subject.to_csv(output_dir / "frozen_test_participants.csv", index=False)
+    np.savez_compressed(output_dir / "frozen_test_predictions.npz", probabilities=probabilities,
+                        labels=labels, subjects=subjects)
+
+    onnx_path = output_dir / "frozen_candidate.onnx"
+    export_model(model, onnx_path, len(COMMON_FEATURE_COLUMNS))
+    parity_sample = torch.from_numpy(scaled[:min(32, len(scaled))])
+    parity_difference = verify_onnx_probabilities(model, onnx_path, parity_sample)
+    report = {
+        "study_type": "exploratory",
+        "candidate": candidate["name"],
+        "checkpoint_sha256": frozen["checkpoint_sha256"],
+        "selection_split": "validation",
+        "evaluation_split": "test",
+        "test_subjects": test_subjects,
+        "test_epoch_count": int(len(frame)),
+        "test_sequence_count": int(len(sequences)),
+        "unknown_stage_count": int(unknown),
+        "threshold": threshold,
+        "threshold_source": "frozen_validation",
+        "pooled": pooled,
+        "participant_macro_f1": float(per_subject["f1"].mean()),
+        "participant_macro_balanced_accuracy": float(per_subject["balanced_accuracy"].mean()),
+        "per_subject_summary": {
+            "count": int(len(per_subject)),
+            "macro_f1": float(per_subject["f1"].mean()),
+            "minimum_f1": float(per_subject["f1"].min()),
+            "maximum_f1": float(per_subject["f1"].max()),
+        },
+        "calibration": _calibration(labels, probabilities),
+        "deployment_smoke": {
+            "onnx_exported": True,
+            "pytorch_onnx_max_abs_difference": parity_difference,
+            "parity_tolerance": 1e-5,
+            "parity_passed": bool(parity_difference <= 1e-5),
+            "android_model_bundled": False,
+        },
+        "evaluated_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    write_manifest(result_path, report)
+    result_digest = _sha256(result_path)
+    updated = {**frozen, "test_evaluated": True,
+               "test_evaluation_sha256": result_digest,
+               "test_evaluation_path": str(result_path)}
+    temporary = frozen_path.with_name(f".{frozen_path.name}.tmp")
+    write_manifest(temporary, updated)
+    temporary.replace(frozen_path)
+    return report
 
 
 def run_validation_ladder(
@@ -376,15 +559,24 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--mesa-artifacts", type=Path, required=True)
     run.add_argument("--output-dir", type=Path, default=Path("ml/artifacts/performance_recovery"))
     run.add_argument("--threads", type=int, default=4)
+    evaluate = commands.add_parser("evaluate-frozen", help="evaluate one frozen candidate on its locked test subjects")
+    evaluate.add_argument("--frozen-candidate", type=Path, required=True)
+    evaluate.add_argument("--raw-root", type=Path, required=True)
+    evaluate.add_argument("--frozen-splits", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "regenerate":
         frame, _ = regenerate_corrected_bidsleep(args.raw_root, args.output_dir, args.frozen_splits)
         print(json.dumps({"output_dir": str(args.output_dir.resolve()), "epoch_count": len(frame), "included_splits": ["train", "validation"]}))
-    else:
+    elif args.command == "run":
         report = run_validation_ladder(args.bidsleep_artifacts, args.frozen_splits, args.mesa_artifacts,
                                        args.output_dir, threads=args.threads)
         print(json.dumps({"output_dir": str(args.output_dir.resolve()), "ranking": report["ranking"],
                           "frozen_candidate": report["frozen_candidate"]}))
+    else:
+        report = evaluate_frozen_candidate(args.frozen_candidate, args.raw_root, args.frozen_splits)
+        print(json.dumps({"candidate": report["candidate"], "test_subjects": report["test_subjects"],
+                          "pooled_f1": report["pooled"]["f1"],
+                          "participant_macro_f1": report["participant_macro_f1"]}))
 
 
 if __name__ == "__main__":
