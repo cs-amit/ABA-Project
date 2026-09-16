@@ -9,13 +9,13 @@ threshold was 0.371485 and its checkpoint SHA-256 was
 The hash was verified before any test signal or label was opened.
 
 The separate evaluator then created corrected features for exactly the nine
-locked test participants and evaluated the checkpoint once. A persistent start
-record and separate completion record make a second evaluation fail closed;
-the immutable candidate-selection record is never rewritten. New selection
-records bind the complete train/validation/test allocation and the checkpoint
-and scaler bytes and parameters before any test data can be opened. No test row
-was used for feature/scaler fitting, checkpoint selection, threshold selection,
-candidate ranking, or retry decisions.
+locked test participants and evaluated the checkpoint once. Its completion
+record binds the candidate digest and test-result digest. The evaluator code
+now fails closed on any second run and, for future freezes, binds the complete
+train/validation/test allocation plus checkpoint and scaler bytes and
+parameters before opening test data. No test row was used for feature/scaler
+fitting, checkpoint selection, threshold selection, candidate ranking, or
+retry decisions in this run.
 
 ## Validation selection
 

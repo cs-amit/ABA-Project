@@ -95,7 +95,7 @@ treated as negative examples.
 - Activity was observed in 98.7% of aligned epochs and cardiac data in 88.6%.
 - The deterministic split contains 16 train, 4 validation, and 4 test participants (seed 20260915).
 - Frozen test F1 is **0.7970** and balanced accuracy is **0.7695**, compared with always-light F1 0.6637 and balanced accuracy 0.5000.
-- Next: selectively expand the same three small modalities and overlap mapping to a larger participant cohort, then test harmonisation or transfer to the Watch-compatible BIDSleep feature path.
+- Completed: the same three modalities and overlap mapping were selectively expanded to a 500-participant cohort, followed by a validation-only harmonisation/transfer study on the Watch-compatible BIDSleep feature path. See the [expansion and transfer report](../evaluation/mesa-expansion-transfer-report.md) and [performance-recovery report](../evaluation/bidsleep-performance-recovery-report.md).
 
 # References
 

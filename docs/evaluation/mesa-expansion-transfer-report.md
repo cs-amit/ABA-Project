@@ -2,9 +2,11 @@
 
 ## Scope
 
-This is a research benchmark. No MESA or transfer model is exported to ONNX or
-bundled in the Android application. Scores are not deployment accuracy or a
-clinical sleep-stage claim.
+This is a research benchmark. The earlier MESA-500 expansion/transfer run did
+not export a model to ONNX or bundle one in the Android application. A later,
+separately documented performance-recovery run exported its frozen transfer
+checkpoint to an ignored ONNX smoke-test artifact; it likewise was not bundled.
+Scores are not deployment accuracy or a clinical sleep-stage claim.
 
 ## MESA-500 cohort
 
