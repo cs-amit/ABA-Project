@@ -115,7 +115,7 @@ def _run_validation_ladder(
     output_dir = Path(output_dir).resolve()
     if output_dir.exists():
         raise FileExistsError(f"use a new experiment directory: {output_dir}")
-    _require_ignored_output(output_dir)
+    _require_ignored_output(output_dir, _VALIDATION_LADDER_OUTPUT_NAMES)
     if min(max_epochs, pretrain_epochs, patience, sequence_epochs, threads) <= 0:
         raise ValueError("epoch, patience, sequence and thread settings must be positive")
     import joblib
@@ -302,21 +302,23 @@ def load_validation_epochs(
     return frame.sort_values(["subject_id", "epoch_start_s"], kind="stable").reset_index(drop=True)
 
 
-def _require_ignored_output(output_dir: Path) -> None:
+_REGENERATION_OUTPUT_NAMES = ("epochs.parquet", "splits.json", "dataset_manifest.json")
+_VALIDATION_LADDER_OUTPUT_NAMES = (
+    "declared_configuration.json", "native_logistic.joblib",
+    "native_logistic_validation_participants.csv", "native_logistic_validation_predictions.npz",
+    "native_logistic_validation.json", "shared_control.pt", "shared_control_scaler.joblib",
+    "shared_control_validation_participants.csv", "shared_control_validation_predictions.npz",
+    "shared_control_validation.json", "mesa_pretrained.pt", "mesa_scaler.joblib",
+    "mesa_pretraining.json", "mesa_transfer.pt", "mesa_transfer_scaler.joblib",
+    "mesa_transfer_validation_participants.csv", "mesa_transfer_validation_predictions.npz",
+    "mesa_transfer_validation.json", "frozen_candidate.json", "validation_report.json",
+)
+
+
+def _require_ignored_output(output_dir: Path, output_names: tuple[str, ...]) -> None:
     ancestor = output_dir
     while not ancestor.exists():
         ancestor = ancestor.parent
-    output_names = (
-        "epochs.parquet", "splits.json", "dataset_manifest.json",
-        "declared_configuration.json", "native_logistic.joblib",
-        "native_logistic_validation_participants.csv", "native_logistic_validation_predictions.npz",
-        "native_logistic_validation.json", "shared_control.pt", "shared_control_scaler.joblib",
-        "shared_control_validation_participants.csv", "shared_control_validation_predictions.npz",
-        "shared_control_validation.json", "mesa_pretrained.pt", "mesa_scaler.joblib",
-        "mesa_pretraining.json", "mesa_transfer.pt", "mesa_transfer_scaler.joblib",
-        "mesa_transfer_validation_participants.csv", "mesa_transfer_validation_predictions.npz",
-        "mesa_transfer_validation.json", "frozen_candidate.json", "validation_report.json",
-    )
     for name in output_names:
         result = subprocess.run(
             ["git", "-C", str(ancestor), "check-ignore", "-q", "--", str(output_dir / name)],
@@ -334,7 +336,7 @@ def regenerate_corrected_bidsleep(
     raw_root, output_dir = Path(raw_root).resolve(), Path(output_dir).resolve()
     if output_dir.exists():
         raise FileExistsError(f"use a new corrected artifact directory: {output_dir}")
-    _require_ignored_output(output_dir)
+    _require_ignored_output(output_dir, _REGENERATION_OUTPUT_NAMES)
     subjects = allocation["train"] + allocation["validation"]
     for subject in subjects:
         subject_path = (raw_root / subject).resolve()

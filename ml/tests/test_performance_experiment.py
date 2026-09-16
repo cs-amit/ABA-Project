@@ -57,7 +57,21 @@ def test_output_guard_rejects_ignore_rules_that_cover_only_regeneration_sentinel
     )
 
     with pytest.raises(ValueError, match="Git-ignored"):
-        api._require_ignored_output(tmp_path / "run")
+        api._require_ignored_output(tmp_path / "run", api._VALIDATION_LADDER_OUTPUT_NAMES)
+
+
+def test_regeneration_accepts_ignore_rules_for_only_its_outputs(raw_and_output, allocation):
+    raw, output = raw_and_output
+    output.parent.parent.parent.joinpath(".gitignore").write_text(
+        "ml/artifacts/corrected/epochs.parquet\n"
+        "ml/artifacts/corrected/splits.json\n"
+        "ml/artifacts/corrected/dataset_manifest.json\n",
+        encoding="utf-8",
+    )
+
+    frame, _ = experiment_api().regenerate_corrected_bidsleep(raw, output, allocation)
+
+    assert len(frame) == 4
 
 
 def test_regeneration_recovers_zcr_without_reading_test_subjects(raw_and_output, allocation):
