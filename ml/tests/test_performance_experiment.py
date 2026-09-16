@@ -1,6 +1,7 @@
 import importlib
 import json
 import subprocess
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -45,6 +46,18 @@ def raw_and_output(tmp_path, allocation):
     # A test directory with unreadable/missing source files must never be opened.
     (raw / "Bidslab03" / "1").mkdir(parents=True)
     return raw, tmp_path / "ml" / "artifacts" / "corrected"
+
+
+def test_output_guard_rejects_ignore_rules_that_cover_only_regeneration_sentinels(tmp_path):
+    api = experiment_api()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_text(
+        "run/epochs.parquet\nrun/splits.json\nrun/dataset_manifest.json\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Git-ignored"):
+        api._require_ignored_output(tmp_path / "run")
 
 
 def test_regeneration_recovers_zcr_without_reading_test_subjects(raw_and_output, allocation):
@@ -124,3 +137,97 @@ def test_regeneration_cli(raw_and_output, allocation):
     result = pd.read_parquet(output / "epochs.parquet")
     assert len(result) == 4
     assert set(result.split) == {"train", "validation"}
+
+
+def candidate(name, macro, pooled, balanced):
+    return {"name": name, "participant_macro_f1": macro, "pooled": {"f1": pooled},
+            "participant_macro_balanced_accuracy": balanced}
+
+
+def test_ranking_uses_macro_and_advancement_enforces_all_three_limits():
+    api = experiment_api()
+    baseline = candidate("native_logistic", .60, .65, .62)
+    rows = [baseline, candidate("pooled_only", .609, .9, .8),
+            candidate("pooled_regression", .70, .649, .7),
+            candidate("ba_regression", .69, .66, .614),
+            candidate("eligible", .61, .65, .615)]
+    ranking, frozen = api.rank_validation_candidates(rows, "native_logistic")
+    assert ranking == ["pooled_regression", "ba_regression", "eligible", "pooled_only", "native_logistic"]
+    assert frozen == "eligible"
+    assert api.rank_validation_candidates(rows[:2], "native_logistic")[1] is None
+
+
+def test_freeze_persists_checkpoint_digest_and_refuses_overwrite(tmp_path):
+    api = experiment_api()
+    checkpoint = tmp_path / "candidate.pt"
+    checkpoint.write_bytes(b"model bytes")
+    selected = {**candidate("chosen", .7, .7, .7), "checkpoint_path": str(checkpoint),
+                "validation_threshold": .42, "feature_columns": ["f"],
+                "model_config": {"seed": 17}, "scaler": {"fit_split": "train"},
+                "participants": {"train": ["a"], "validation": ["b"]}}
+    path = api.persist_frozen_candidate(selected, tmp_path)
+    result = json.loads(path.read_text())
+    assert result["candidate"] == selected
+    assert result["checkpoint_sha256"] == "9cb7487000bc86ac36ce83c4acfabe8878552be99572a6770f65ab1d048a5c48"
+    with pytest.raises(FileExistsError):
+        api.persist_frozen_candidate(selected, tmp_path)
+
+
+def test_runner_rejects_test_before_constructing_sequences(epochs, allocation, tmp_path, monkeypatch):
+    api = experiment_api()
+    frame = pd.concat([epochs, pd.DataFrame([{"subject_id": "Bidslab03", "split": "test"}])], ignore_index=True)
+    def prohibited(*args, **kwargs):
+        pytest.fail("sequence construction preceded test-row rejection")
+    monkeypatch.setattr(api, "build_validation_sequences", prohibited)
+    with pytest.raises(ValueError, match="test rows"):
+        api.run_validation_ladder(frame, allocation, tmp_path / "absent_mesa", tmp_path / "out")
+
+
+def test_native_sequences_preserve_feature_order_and_gap_boundaries(epochs):
+    api = experiment_api()
+    epochs.loc[1, "epoch_start_s"] = 90
+    epochs.loc[3, FEATURE_COLUMNS[0]] = 7
+    values, labels, subjects, splits = api.build_validation_sequences(epochs, FEATURE_COLUMNS, 2)
+    assert values.shape == (1, 2, len(FEATURE_COLUMNS))
+    assert values[0, -1, 0] == 7
+    assert labels.tolist() == [0]
+    assert subjects.tolist() == ["Bidslab02"]
+    assert splits.tolist() == ["validation"]
+
+
+def test_small_ladder_saves_reproducible_validation_only_records(tmp_path, allocation):
+    import torch
+    from ml.transfer_features import adapt_bidsleep_common
+    api = experiment_api()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_text("artifacts/\n", encoding="utf-8")
+    rows = []
+    for subject, split in (("Bidslab01", "train"), ("Bidslab02", "validation")):
+        for i in range(24):
+            rows.append({"subject_id": subject, "split": split, "epoch_start_s": i * 30,
+                         "label": i % 2, **{column: float(i % 2) for column in FEATURE_COLUMNS}})
+    frame = pd.DataFrame(rows)
+    mesa = adapt_bidsleep_common(frame).rename(columns={"activity_availability": "activity_observed", "heart_rate_availability": "heart_rate_valid_ratio"})
+    mesa.subject_id = mesa.subject_id.str.replace("Bidslab", "mesa-")
+    mesa_path = tmp_path / "mesa.parquet"
+    mesa.to_parquet(mesa_path, index=False)
+    output = tmp_path / "artifacts" / "run"
+    original_deterministic = torch.are_deterministic_algorithms_enabled()
+    original_threads = torch.get_num_threads()
+    report = api.run_validation_ladder(frame, allocation, mesa_path, output,
+                                       max_epochs=1, pretrain_epochs=1, sequence_epochs=3, threads=1)
+    assert torch.are_deterministic_algorithms_enabled() == original_deterministic
+    assert torch.get_num_threads() == original_threads
+    assert report["baseline"] == "native_logistic"
+    assert len(report["candidates"]) == 3
+    assert report["selection_split"] == "validation"
+    for row in report["candidates"]:
+        assert row["participants"] == {"train": ["Bidslab01"], "validation": ["Bidslab02"]}
+        assert row["scaler"]["fit_split"] == "train"
+        assert Path(row["checkpoint_path"]).is_file()
+        assert 0 <= row["validation_threshold"] <= 1
+        assert row["model_config"]["sequence_epochs"] == 3
+        assert row["feature_columns"]
+    assert json.loads((output / "validation_report.json").read_text())["ranking"] == report["ranking"]
+    if report["frozen_candidate"] is None:
+        assert not (output / "frozen_candidate.json").exists()
