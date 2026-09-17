@@ -16,12 +16,11 @@ import android.view.View
 import android.widget.*
 import com.aba.smartsleep.app.alarm.AlarmScheduler
 import com.aba.smartsleep.app.alarm.AndroidAlarmGateway
+import com.aba.smartsleep.app.inference.DEMO_BUTTON_LABEL
 import com.aba.smartsleep.core.model.AlarmSettings
 import java.text.DateFormat
 import java.util.Locale
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 
 class MainActivity : Activity() {
     private lateinit var content: LinearLayout
@@ -44,8 +43,8 @@ class MainActivity : Activity() {
         window.statusBarColor = NAVY
         showDashboard()
         uiScope.launch {
-            smartSleepApplication.dashboardState.map { state -> state.epochsGenerated }.distinctUntilChanged().collect {
-                if (currentTab == DashboardTab.LIVE) updateLive(smartSleepApplication.dashboardState.value)
+            smartSleepApplication.dashboardState.collect { state ->
+                if (currentTab == DashboardTab.LIVE) updateLive(state)
             }
         }
     }
@@ -127,6 +126,17 @@ class MainActivity : Activity() {
         addHeading("Live data", "Updates once for each completed 30-second epoch")
         liveViews = LiveViews(addCard(), addCard(), addCard(), addCard())
         updateLive(smartSleepApplication.dashboardState.value)
+        content.addView(Button(this).apply {
+            text = DEMO_BUTTON_LABEL
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(ACCENT)
+            setOnClickListener {
+                isEnabled = false
+                smartSleepApplication.runDemoInference()
+                postDelayed({ isEnabled = true }, 750L)
+                Toast.makeText(this@MainActivity, "Synthetic demo only — no alarm is scheduled", Toast.LENGTH_LONG).show()
+            }
+        }, standardMargins())
         if (notificationPermissionNeeded(Build.VERSION.SDK_INT, notificationPermissionGranted())) {
             content.addView(Button(this).apply {
                 text = "Allow alarm notifications"
@@ -142,6 +152,18 @@ class MainActivity : Activity() {
         views.watch.text = if (state.watchLinked) {
             "WATCH CONNECTION\nConnected • ${state.batchesReceived} batches • ${state.samplesReceived} samples"
         } else "WATCH CONNECTION\nWaiting for watch data"
+        val demo = state.demoResult
+        if (demo != null) {
+            views.progress.text = "DEMO WINDOW • SYNTHETIC DATA\n${demo.epochsProcessed} / 10 epochs\nPassed through the same ONNX pipeline"
+            views.epoch.text = "DEMO DATA — NOT FROM WATCH\n" + formatEpoch(demo.latestEpoch.toEpochSummary())
+            views.prediction.text = if (demo.inferenceAvailable) {
+                val thresholdStatus = if (demo.aboveAlarmThreshold) "Above alarm threshold" else "Below alarm threshold"
+                "DEMO ONNX RESULT\n${formatSleepProbability(demo.probability)} sleep probability\n$thresholdStatus • no real alarm scheduled"
+            } else {
+                "DEMO ONNX RESULT\nModel unavailable • no real alarm scheduled"
+            }
+            return
+        }
         views.progress.text = "PREDICTION WINDOW\n${state.epochsInCurrentWindow} / 10 epochs\nA prediction is made after ten valid epochs"
         views.epoch.text = state.latestEpoch?.let(::formatEpoch) ?: "LATEST EPOCH\nWaiting for the first complete epoch"
         views.prediction.text = state.latestProbability?.let {

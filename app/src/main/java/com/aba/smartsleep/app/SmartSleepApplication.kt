@@ -8,6 +8,7 @@ import com.aba.smartsleep.app.data.RoomSessionRepository
 import com.aba.smartsleep.app.data.PredictionEventEntity
 import com.aba.smartsleep.app.inference.LiveInferenceProcessor
 import com.aba.smartsleep.app.inference.OnnxProbabilityModel
+import com.aba.smartsleep.app.inference.DemoInferenceRunner
 import com.aba.smartsleep.app.transport.PhoneBatchDataLayerRecovery
 import com.aba.smartsleep.app.transport.WearableReceiver
 import com.aba.smartsleep.app.transport.WatchAcknowledgementRetryCoordinator
@@ -28,12 +29,13 @@ class SmartSleepApplication : Application() {
         private set
     private val mutableDashboardState = MutableStateFlow(DashboardState())
     val dashboardState: StateFlow<DashboardState> = mutableDashboardState.asStateFlow()
+    private lateinit var liveInference: LiveInferenceProcessor
     private lateinit var acknowledgementRetry: WatchAcknowledgementRetryCoordinator
 
     override fun onCreate() {
         super.onCreate()
         WearableReceiver.initialize(filesDir)
-        val liveInference = LiveInferenceProcessor(OnnxProbabilityModel.fromAssetsOrNull(assets))
+        liveInference = LiveInferenceProcessor(OnnxProbabilityModel.fromAssetsOrNull(assets))
         sessionRepository = RoomSessionRepository(
             Room.databaseBuilder(applicationContext, AppDatabase::class.java, DATABASE_NAME).build(),
             onCommittedEpochs = { epochs ->
@@ -49,6 +51,7 @@ class SmartSleepApplication : Application() {
                         },
                         latestEpoch = epoch.toEpochSummary(),
                         latestProbability = prediction?.probability ?: mutableDashboardState.value.latestProbability,
+                        demoResult = null,
                     )
                     prediction?.let {
                         sessionRepository.recordPrediction(
@@ -110,6 +113,13 @@ class SmartSleepApplication : Application() {
             } catch (error: Throwable) {
                 Log.w(TAG, "Unable to replay persisted sensor batch Data Items.", error)
             }
+        }
+    }
+
+    fun runDemoInference() {
+        applicationScope.launch {
+            val demo = DemoInferenceRunner(liveInference).run()
+            mutableDashboardState.value = mutableDashboardState.value.copy(demoResult = demo)
         }
     }
 

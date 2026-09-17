@@ -2,6 +2,7 @@ package com.aba.smartsleep.app
 
 import com.aba.smartsleep.core.features.FeatureEpoch
 import com.aba.smartsleep.core.features.FeatureValue
+import com.aba.smartsleep.app.inference.DemoInferenceResult
 import java.util.Calendar
 import java.util.TimeZone
 import java.util.Locale
@@ -75,4 +76,5 @@ data class DashboardState(
     val epochsInCurrentWindow: Int = 0,
     val latestEpoch: EpochSummary? = null,
     val latestProbability: Float? = null,
+    val demoResult: DemoInferenceResult? = null,
 )
