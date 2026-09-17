@@ -13,6 +13,7 @@ data class AlarmRequest(
 
 interface AlarmGateway {
     fun schedule(request: AlarmRequest)
+    fun cancel(sessionId: String)
 }
 
 fun interface Clock {
@@ -33,6 +34,10 @@ class AlarmScheduler(
     fun scheduleFallback(sessionId: String, settings: AlarmSettings) {
         scheduleFallback(sessionId, settings.targetEpochMillis)
     }
+
+    fun cancelFallback(sessionId: String) {
+        gateway.cancel(sessionId)
+    }
 }
 
 class AndroidAlarmGateway(context: Context) : AlarmGateway {
@@ -40,12 +45,7 @@ class AndroidAlarmGateway(context: Context) : AlarmGateway {
     private val alarmManager = appContext.getSystemService(AlarmManager::class.java)
 
     override fun schedule(request: AlarmRequest) {
-        val operation = PendingIntent.getBroadcast(
-            appContext,
-            request.sessionId.hashCode(),
-            AlarmReceiver.fallbackIntent(appContext, request.sessionId),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        val operation = fallbackOperation(request.sessionId)
         val showIntent = PendingIntent.getActivity(
             appContext,
             request.sessionId.hashCode() xor DISPLAY_REQUEST_CODE_MASK,
@@ -58,6 +58,20 @@ class AndroidAlarmGateway(context: Context) : AlarmGateway {
             operation,
         )
     }
+
+    override fun cancel(sessionId: String) {
+        fallbackOperation(sessionId).also { operation ->
+            alarmManager.cancel(operation)
+            operation.cancel()
+        }
+    }
+
+    private fun fallbackOperation(sessionId: String): PendingIntent = PendingIntent.getBroadcast(
+        appContext,
+        sessionId.hashCode(),
+        AlarmReceiver.fallbackIntent(appContext, sessionId),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
 
     private companion object {
         const val DISPLAY_REQUEST_CODE_MASK = 0x51A7

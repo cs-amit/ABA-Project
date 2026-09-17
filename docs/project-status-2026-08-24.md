@@ -1,5 +1,9 @@
 # Smart Sleep Alarm — Team Project Status
 
+> **Historical snapshot — 24 August 2026.** This document is superseded by
+> [`project-status-2026-09-17.md`](project-status-2026-09-17.md) and is retained
+> for its dated development history.
+
 **Status date:** 24 August 2026  
 **Current branch:** `feat/initial-smart-sleep-prototype`
 

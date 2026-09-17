@@ -1,5 +1,10 @@
 # Smart Sleep Alarm
 
+> **Historical implementation plan — superseded.** MESA access, the 500-person
+> benchmark, transfer study, and BIDSleep performance-recovery candidate are
+> now complete. See [`project-status-2026-09-17.md`](../project-status-2026-09-17.md)
+> and the linked evaluation reports for current evidence.
+
 ## BIDSleep Dataset and Machine-Learning Implementation Plan
 
 **Purpose:** Class presentation and course implementation plan  

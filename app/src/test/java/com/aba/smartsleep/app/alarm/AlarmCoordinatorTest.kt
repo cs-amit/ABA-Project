@@ -29,6 +29,15 @@ class AlarmCoordinatorTest {
     }
 
     @Test
+    fun `cancels the fallback alarm for a session`() {
+        val gateway = FakeAlarmGateway()
+
+        AlarmScheduler(gateway, FixedClock(100)).cancelFallback("s1")
+
+        assertEquals(listOf("s1"), gateway.cancelled)
+    }
+
+    @Test
     fun `light sleep starts haptics before delayed phone audio`() {
         val output = FakeAlarmOutput()
         val delayScheduler = FakeDelayScheduler()
@@ -72,9 +81,14 @@ class AlarmCoordinatorTest {
 
     private class FakeAlarmGateway : AlarmGateway {
         val scheduled = mutableListOf<AlarmRequest>()
+        val cancelled = mutableListOf<String>()
 
         override fun schedule(request: AlarmRequest) {
             scheduled += request
+        }
+
+        override fun cancel(sessionId: String) {
+            cancelled += sessionId
         }
     }
 

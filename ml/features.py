@@ -37,11 +37,19 @@ def load_bidsleep_night(night_dir: Path, subject_id: str) -> tuple[pd.DataFrame,
     return accel, heart_rate, pd.DataFrame(labels, columns=["subject_id", "epoch_start_s", "stage"])
 
 
-def prepare_official_bidsleep(raw_root: Path, output_dir: Path, seed: int = 42):
-    """Prepare official per-night BIDSleep files without storing raw inputs in the repository."""
+def read_official_bidsleep_epochs(raw_root: Path, subjects: list[str] | None = None):
+    """Extract epochs, optionally opening only explicitly selected subjects.
+
+    Filtering happens before reading any night files, so a validation artifact
+    can be regenerated without opening held-out test labels or signals.
+    """
     rows = []
     unknown = 0
-    for subject_dir in sorted(path for path in raw_root.iterdir() if path.is_dir() and path.name.startswith("Bidslab")):
+    if subjects is None:
+        subject_dirs = sorted(path for path in raw_root.iterdir() if path.is_dir() and path.name.startswith("Bidslab"))
+    else:
+        subject_dirs = [raw_root / subject for subject in sorted(subjects)]
+    for subject_dir in subject_dirs:
         for night_dir in sorted(path for path in subject_dir.iterdir() if path.is_dir()):
             accel, heart_rate, labels = load_bidsleep_night(night_dir, subject_dir.name)
             accel_times = accel["timestamp_s"].to_numpy()
@@ -58,6 +66,12 @@ def prepare_official_bidsleep(raw_root: Path, output_dir: Path, seed: int = 42):
                 row.update(build_epoch_features(accel.iloc[a_start:a_end], heart_rate.iloc[h_start:h_end], start, end))
                 rows.append(row)
     result = pd.DataFrame(rows, columns=["subject_id", "epoch_start_s", "label", *FEATURE_COLUMNS])
+    return result, unknown
+
+
+def prepare_official_bidsleep(raw_root: Path, output_dir: Path, seed: int = 42):
+    """Prepare official per-night BIDSleep files without storing raw inputs in the repository."""
+    result, unknown = read_official_bidsleep_epochs(raw_root)
     allocation = split_subjects(result.subject_id.tolist(), seed=seed)
     result["split"] = result.subject_id.map({subject: split for split, subjects in allocation.items() for subject in subjects})
     validate_epoch_frame(result)

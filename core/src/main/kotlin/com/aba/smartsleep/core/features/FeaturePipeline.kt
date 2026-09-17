@@ -12,12 +12,14 @@ class FeatureEpoch(
     val endEpochMillis: Long,
     val values: FloatArray,
     val validForInference: Boolean,
+    /** Unscaled extraction values retained for the separately frozen deployment scaler. */
+    val rawValues: FloatArray = values,
 ) {
     override fun equals(other: Any?): Boolean = other is FeatureEpoch && sessionId == other.sessionId &&
         startEpochMillis == other.startEpochMillis && endEpochMillis == other.endEpochMillis &&
-        values.contentEquals(other.values) && validForInference == other.validForInference
+        values.contentEquals(other.values) && validForInference == other.validForInference && rawValues.contentEquals(other.rawValues)
 
-    override fun hashCode(): Int = arrayOf(sessionId, startEpochMillis, endEpochMillis, values.contentHashCode(), validForInference).contentHashCode()
+    override fun hashCode(): Int = arrayOf(sessionId, startEpochMillis, endEpochMillis, values.contentHashCode(), validForInference, rawValues.contentHashCode()).contentHashCode()
 
     fun modelInput(): FloatArray {
         require(values.size == FeatureValue.entries.size) { "Feature epoch must use the complete extraction contract." }
@@ -111,7 +113,7 @@ class FeaturePipeline(
         val inferenceReady = qualitySufficient && priorValidRawValues.isNotEmpty()
         val values = normalize(extraction.values)
         if (qualitySufficient) priorValidRawValues += extraction.values.copyOf()
-        return FeatureEpoch(sessionId, start, end, values, inferenceReady).also(completedEpochs::add)
+        return FeatureEpoch(sessionId, start, end, values, inferenceReady, extraction.values.copyOf()).also(completedEpochs::add)
     }
 
     private fun extract(epoch: List<SensorSample>): Extraction {
