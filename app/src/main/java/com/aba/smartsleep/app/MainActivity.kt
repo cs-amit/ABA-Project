@@ -7,6 +7,8 @@ import android.app.TimePickerDialog
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.widget.*
@@ -20,7 +22,11 @@ class MainActivity : Activity() {
     private var selectedWindow = 30
     private var selectedHour = 7
     private var selectedMinute = 0
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); showDashboard() }
+    private var currentTab = DashboardTab.LIVE
+    private val refreshHandler = Handler(Looper.getMainLooper())
+    private val refreshTask = object : Runnable { override fun run() { if (currentTab == DashboardTab.LIVE) renderLive(); refreshHandler.postDelayed(this, 2000) } }
+    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); showDashboard(); refreshHandler.postDelayed(refreshTask, 2000) }
+    override fun onDestroy() { refreshHandler.removeCallbacks(refreshTask); super.onDestroy() }
     private fun showDashboard() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 28, 32, 20) }
         root.addView(TextView(this).apply { text = "Smart Sleep\nClassroom monitoring MVP"; textSize = 25f })
@@ -30,7 +36,7 @@ class MainActivity : Activity() {
         DashboardTab.entries.forEach { tab -> nav.addView(Button(this).apply { text = tab.label; setOnClickListener { render(tab) } }, LinearLayout.LayoutParams(0, -2, 1f)) }
         root.addView(nav); setContentView(root); render(DashboardTab.LIVE)
     }
-    private fun render(tab: DashboardTab) { content.removeAllViews(); when (tab) { DashboardTab.LIVE -> renderLive(); DashboardTab.ALARM -> renderAlarm(); DashboardTab.HISTORY -> renderHistory() } }
+    private fun render(tab: DashboardTab) { currentTab = tab; content.removeAllViews(); when (tab) { DashboardTab.LIVE -> renderLive(); DashboardTab.ALARM -> renderAlarm(); DashboardTab.HISTORY -> renderHistory() } }
     private fun renderLive() {
         val s = (application as SmartSleepApplication).dashboardState.value
         addHeading("Live watch data"); addCard("Watch", if (s.watchLinked) "Connected" else "Waiting for watch data")
