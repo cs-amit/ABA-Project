@@ -99,9 +99,9 @@ overconfident in higher bins; for example, the 0.8-0.9 bin averaged 0.8408 with
 The frozen PyTorch model exported to ONNX successfully. On a 32-sequence smoke
 sample, maximum absolute PyTorch/ONNX probability difference was 5.96e-08,
 well below the 1e-05 tolerance. The full Gradle JVM suite completed successfully
-for the app, core, and Wear modules. No app behavior changed, and no model was
-bundled: the generated checkpoint, corrected test features, predictions, and
-ONNX file remain Git-ignored research artifacts.
+for the app, core, and Wear modules. The generated checkpoint, corrected test
+features, and predictions remain Git-ignored research artifacts; a 31 KB copy
+of the frozen ONNX model is bundled for the classroom MVP only.
 
 ## Limitations
 

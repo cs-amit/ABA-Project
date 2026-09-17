@@ -27,8 +27,9 @@ For the complete JVM suite, run `.\gradlew.bat test`. The offline ML suite is
 Current evidence is summarized in [`docs/project-status-2026-09-17.md`](docs/project-status-2026-09-17.md),
 the [model card](docs/evaluation/model-card.md), and the [performance-recovery
 report](docs/evaluation/bidsleep-performance-recovery-report.md). The Android
-app currently demonstrates capture, transfer, persistence, and safe fallback
-alarm behavior; it does **not** load the ignored research ONNX model.
+app demonstrates capture, transfer, persistence, optional ONNX inference, and
+safe fallback alarm behavior. The bundled model remains a classroom research
+MVP, not a clinical or deployment-validated model.
 
 The project stores health and session data locally by default. It contains no accounts, cloud sync, analytics, advertising, microphone capture, Samsung Health Data SDK, context logging, or schedule-advisor functionality.
 

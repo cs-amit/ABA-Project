@@ -10,8 +10,9 @@ debug apps:
 .\gradlew.bat :app:installDebug :wear:installDebug
 ```
 
-The app demo covers local Watch capture, ordered transfer, persistence, and the
-exact-time fallback alarm. It does not load the offline research ONNX model.
+The app demo covers local Watch capture, ordered transfer, persistence, the
+classroom MVP ONNX inference path, and the exact-time fallback alarm. The model
+is exploratory and not clinically or deployment validated.
 
 ## Demo sequence
 

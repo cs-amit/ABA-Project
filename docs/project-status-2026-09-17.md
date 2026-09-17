@@ -12,8 +12,8 @@
   candidate reached validation participant-macro F1 `0.6562`; its one permitted
   exploratory BIDSleep test evaluation reached participant-macro F1 `0.6434`.
 - The checkpoint exported to ONNX with maximum PyTorch/ONNX probability delta
-  `5.96e-08`. The model remains an ignored research artifact and is not bundled
-  in the app.
+  `5.96e-08`. A 31 KB copy is bundled in the phone APK for the classroom MVP;
+  it remains exploratory and is not a clinical/deployment claim.
 - Verification completed: 153 ML tests and the full Gradle app/core/Wear suite.
 
 ## Owner hardware checks still required

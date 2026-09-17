@@ -96,7 +96,8 @@ Participant-macro balanced accuracy decreased by 0.0030.
 
 The frozen model exported to ONNX and matched PyTorch on the smoke sample with
 maximum absolute probability difference 5.96e-08 (tolerance 1e-05). Android,
-core, and Wear JVM tests passed, but the ONNX file remains an ignored research
-artifact and is not bundled in the application. See
+core, and Wear JVM tests passed. The 31 KB ONNX model is bundled for the
+classroom MVP, but remains an exploratory artifact rather than a deployment or
+clinical model. See
 [`bidsleep-performance-recovery-report.md`](bidsleep-performance-recovery-report.md)
 for the full protocol, calibration summary, and limitations.
