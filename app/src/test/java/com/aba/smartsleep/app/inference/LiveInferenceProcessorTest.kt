@@ -5,6 +5,7 @@ import com.aba.smartsleep.core.features.FeatureValue
 import com.aba.smartsleep.core.inference.ProbabilityModel
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.Instant
 
 class LiveInferenceProcessorTest {
     @Test
@@ -44,14 +45,29 @@ class LiveInferenceProcessorTest {
         assertEquals(0, processor.currentWindowEpochCount("s1"))
     }
 
-    private fun epoch(index: Int, valid: Boolean = true): FeatureEpoch {
+    @Test
+    fun `encodes model clock features in India time`() {
+        var modelValues = FloatArray(0)
+        val processor = LiveInferenceProcessor(ProbabilityModel { _, values ->
+            modelValues = values
+            0.6f
+        })
+        val midnightUtc = Instant.parse("2024-01-01T00:00:00Z").toEpochMilli()
+
+        repeat(10) { index -> processor.accept(epoch(index, baseEpochMillis = midnightUtc)) }
+
+        assertEquals(0.39599103f, modelValues[6], 0.000001f)
+        assertEquals(-0.6632672f, modelValues[7], 0.000001f)
+    }
+
+    private fun epoch(index: Int, valid: Boolean = true, baseEpochMillis: Long = 0L): FeatureEpoch {
         val raw = FloatArray(FeatureValue.entries.size)
         raw[FeatureValue.ACTIVITY_COUNT.index] = 4f
         raw[FeatureValue.ACCEL_VALID_SAMPLE_RATIO.index] = 1f
         raw[FeatureValue.HEART_RATE_MEAN.index] = 64f
         raw[FeatureValue.HEART_RATE_STANDARD_DEVIATION.index] = 1f
         raw[FeatureValue.HEART_RATE_VALID_SAMPLE_RATIO.index] = 1f
-        val start = index * 30_000L
+        val start = baseEpochMillis + index * 30_000L
         return FeatureEpoch("s1", start, start + 30_000L, raw, valid, raw)
     }
 }

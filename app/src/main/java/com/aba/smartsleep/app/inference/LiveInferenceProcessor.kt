@@ -58,6 +58,6 @@ class LiveInferenceProcessor(model: ProbabilityModel?) {
     }
 
     private companion object {
-        val MODEL_ZONE: ZoneId = ZoneId.of("America/New_York")
+        val MODEL_ZONE: ZoneId = ZoneId.of("Asia/Kolkata")
     }
 }
