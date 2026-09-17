@@ -16,6 +16,10 @@ import com.samsung.android.service.health.tracking.HealthTrackingService
 import com.samsung.android.service.health.tracking.data.DataPoint
 import com.samsung.android.service.health.tracking.data.HealthTrackerType
 import com.samsung.android.service.health.tracking.data.ValueKey
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -29,6 +33,8 @@ class SamsungHealthSensorDataSource(
     private val stateLock = Any()
     private val sampleHandoff = RetainedSampleHandoff(SAMPLE_BUFFER_CAPACITY)
     private val activeTrackers = mutableMapOf<HealthTrackerType, HealthTracker>()
+    private val flushScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val trackerFlusher = ActiveTrackerFlusher(flushScope, ::flushHeartRate)
 
     private val capabilityState = CaptureCapabilityState(hapticCapability())
     private var activeSessionId: String? = null
@@ -95,6 +101,7 @@ class SamsungHealthSensorDataSource(
             capabilityState.onCaptureFailure()
         }
         healthTrackingService.disconnectService()
+        flushScope.cancel()
     }
 
     private fun onServiceConnected() {
@@ -119,6 +126,7 @@ class SamsungHealthSensorDataSource(
                     HealthTrackerType.HEART_RATE_CONTINUOUS,
                     heartRateListener,
                 )
+                trackerFlusher.start()
             }
         } catch (error: RuntimeException) {
             handleCaptureFailure()
@@ -139,8 +147,21 @@ class SamsungHealthSensorDataSource(
     }
 
     private fun stopTrackersLocked() {
+        trackerFlusher.stop()
         activeTrackers.values.forEach(HealthTracker::unsetEventListener)
         activeTrackers.clear()
+    }
+
+    private fun flushHeartRate() {
+        synchronized(stateLock) {
+            if (activeSessionId == null) return
+            val tracker = activeTrackers[HealthTrackerType.HEART_RATE_CONTINUOUS] ?: return
+            try {
+                if (!tracker.flush()) Log.w(TAG, "Heart-rate flush was not accepted; retrying next interval.")
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "Heart-rate flush failed; retrying next interval.", error)
+            }
+        }
     }
 
     private val accelerometerListener = object : HealthTracker.TrackerEventListener {
