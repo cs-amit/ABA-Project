@@ -27,12 +27,18 @@ class SamsungSampleMapperTest {
             timestamp = 2_000,
             bpm = 62f,
             ibi = 967,
-            status = 0,
+            status = 1,
         )
 
         assertEquals(62f, sample.heartRateBpm)
         assertEquals(967, sample.ibiMillis)
         assertEquals(SensorQuality.VALID, sample.quality)
+    }
+
+    @Test
+    fun `initial measuring status is not treated as valid`() {
+        val sample = SamsungSampleMapper.heartRate(3_000, 62f, 967, 0)
+        assertEquals(SensorQuality.DEGRADED, sample.quality)
     }
 
     @Test

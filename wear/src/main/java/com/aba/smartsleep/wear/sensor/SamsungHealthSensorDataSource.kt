@@ -297,7 +297,8 @@ internal class CaptureCapabilityState(
 
 internal object SamsungSampleMapper {
     private const val OFF_BODY_HEART_RATE_STATUS = -3
-    private const val VALID_HEART_RATE_STATUS = 0
+    // Samsung Health Sensor SDK: 1 means a successful measurement; 0 is initial measuring.
+    private const val VALID_HEART_RATE_STATUS = 1
 
     fun heartRate(
         timestamp: Long,
