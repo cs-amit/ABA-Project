@@ -4,6 +4,7 @@ import com.aba.smartsleep.core.features.FeatureEpoch
 import com.aba.smartsleep.core.features.FeatureValue
 import java.util.Calendar
 import java.util.TimeZone
+import java.util.Locale
 import kotlin.math.roundToInt
 
 enum class DashboardTab(val label: String) {
@@ -13,6 +14,11 @@ enum class DashboardTab(val label: String) {
 }
 
 val SUPPORTED_WAKE_WINDOWS = listOf(15, 30, 45)
+
+fun formatSleepProbability(probability: Float): String = when {
+    probability > 0f && probability < 0.00005f -> "<0.01%"
+    else -> String.format(Locale.US, "%.2f%%", probability * 100f)
+}
 
 fun isSupportedWakeWindow(minutes: Int): Boolean = minutes in SUPPORTED_WAKE_WINDOWS
 

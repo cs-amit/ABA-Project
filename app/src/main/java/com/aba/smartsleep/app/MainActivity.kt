@@ -146,7 +146,7 @@ class MainActivity : Activity() {
         views.epoch.text = state.latestEpoch?.let(::formatEpoch) ?: "LATEST EPOCH\nWaiting for the first complete epoch"
         views.prediction.text = state.latestProbability?.let {
             val prefix = if (state.epochsInCurrentWindow == 10) "NEW ONNX PREDICTION" else "LATEST ONNX PREDICTION"
-            "$prefix\n${(it * 100f).toInt()}% sleep probability"
+            "$prefix\n${formatSleepProbability(it)} sleep probability"
         } ?: "ONNX PREDICTION\nWaiting for ten valid epochs"
     }
 
@@ -238,7 +238,7 @@ class MainActivity : Activity() {
         addHeading("Session summary", "Locally stored classroom-MVP activity")
         addInfo("Current session", state.sessionId ?: "No session yet")
         addInfo("Data captured", "${state.samplesReceived} samples • ${state.batchesReceived} batches • ${state.epochsGenerated} epochs")
-        addInfo("Latest prediction", state.latestProbability?.let { "${(it * 100f).toInt()}% sleep probability" } ?: "No prediction recorded yet")
+        addInfo("Latest prediction", state.latestProbability?.let { "${formatSleepProbability(it)} sleep probability" } ?: "No prediction recorded yet")
         addInfo("Storage", "Sensor features and predictions stay on this phone.")
     }
 

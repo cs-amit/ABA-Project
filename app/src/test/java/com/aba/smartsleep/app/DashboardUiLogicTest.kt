@@ -11,6 +11,20 @@ import java.util.TimeZone
 
 class DashboardUiLogicTest {
     @Test
+    fun `small nonzero predictions retain percentage precision`() {
+        assertEquals("0.63%", formatSleepProbability(0.00626710057f))
+        assertEquals("0.42%", formatSleepProbability(0.00420469046f))
+        assertEquals("0.81%", formatSleepProbability(0.00814169645f))
+    }
+
+    @Test
+    fun `tiny positive predictions remain distinct from an exact zero`() {
+        assertEquals("<0.01%", formatSleepProbability(0.00001f))
+        assertEquals("0.00%", formatSleepProbability(0f))
+        assertEquals("100.00%", formatSleepProbability(1f))
+    }
+
+    @Test
     fun `feature epoch is converted to a readable dashboard summary`() {
         val raw = FloatArray(FeatureValue.entries.size).apply {
             this[FeatureValue.ACTIVITY_COUNT.index] = 7f
