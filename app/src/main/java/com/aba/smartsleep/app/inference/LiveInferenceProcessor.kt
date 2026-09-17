@@ -32,11 +32,14 @@ class LiveInferenceProcessor(model: ProbabilityModel?) {
         if (!epoch.validForInference) return null
         val start = sessionStarts.getOrPut(epoch.sessionId) { epoch.startEpochMillis }
         window += epoch.toShared(start)
-        while (window.size > com.aba.smartsleep.core.inference.FrozenSleepModelContract.sequenceEpochs) window.removeFirst()
+        if (window.size < com.aba.smartsleep.core.inference.FrozenSleepModelContract.sequenceEpochs) return null
         val result = adapter.predict(window.toList()) as? InferenceResult.Prediction
+        window.clear()
         if (result != null) latestPrediction = result
         return result
     }
+
+    fun currentWindowEpochCount(sessionId: String): Int = windows[sessionId]?.size ?: 0
 
     private fun FeatureEpoch.toShared(sessionStart: Long): SharedFeatureEpoch {
         val localTime = Instant.ofEpochMilli(startEpochMillis).atZone(MODEL_ZONE).toLocalTime()

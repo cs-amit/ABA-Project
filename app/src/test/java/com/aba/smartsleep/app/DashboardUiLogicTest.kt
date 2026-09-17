@@ -1,5 +1,7 @@
 package com.aba.smartsleep.app
 
+import com.aba.smartsleep.core.features.FeatureEpoch
+import com.aba.smartsleep.core.features.FeatureValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -8,6 +10,33 @@ import java.util.Calendar
 import java.util.TimeZone
 
 class DashboardUiLogicTest {
+    @Test
+    fun `feature epoch is converted to a readable dashboard summary`() {
+        val raw = FloatArray(FeatureValue.entries.size).apply {
+            this[FeatureValue.ACTIVITY_COUNT.index] = 7f
+            this[FeatureValue.HEART_RATE_MEAN.index] = 63.5f
+            this[FeatureValue.HEART_RATE_STANDARD_DEVIATION.index] = 2.25f
+            this[FeatureValue.ACCEL_VALID_SAMPLE_RATIO.index] = .9f
+            this[FeatureValue.HEART_RATE_VALID_SAMPLE_RATIO.index] = .8f
+        }
+
+        val summary = FeatureEpoch("session", 1_000L, 31_000L, raw, true, raw).toEpochSummary()
+
+        assertEquals(7f, summary.activityCount)
+        assertEquals(63.5f, summary.heartRateMean)
+        assertEquals(2.25f, summary.heartRateVariability)
+        assertEquals(90, summary.motionCoveragePercent)
+        assertEquals(80, summary.heartRateCoveragePercent)
+        assertTrue(summary.validForInference)
+    }
+
+    @Test
+    fun `notification action is needed only for an ungranted runtime permission`() {
+        assertTrue(notificationPermissionNeeded(35, permissionGranted = false))
+        assertFalse(notificationPermissionNeeded(35, permissionGranted = true))
+        assertFalse(notificationPermissionNeeded(32, permissionGranted = false))
+    }
+
     @Test
     fun navigationTabsHaveStableLabels() {
         assertEquals(listOf("Live", "Alarm", "History"), DashboardTab.entries.map { it.label })

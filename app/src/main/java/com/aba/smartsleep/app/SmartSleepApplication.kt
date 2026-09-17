@@ -11,6 +11,7 @@ import com.aba.smartsleep.app.inference.OnnxProbabilityModel
 import com.aba.smartsleep.app.transport.PhoneBatchDataLayerRecovery
 import com.aba.smartsleep.app.transport.WearableReceiver
 import com.aba.smartsleep.app.transport.WatchAcknowledgementRetryCoordinator
+import com.aba.smartsleep.core.inference.FrozenSleepModelContract
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,19 +38,24 @@ class SmartSleepApplication : Application() {
             Room.databaseBuilder(applicationContext, AppDatabase::class.java, DATABASE_NAME).build(),
             onCommittedEpochs = { epochs ->
                 epochs.forEach { epoch ->
+                    val prediction = liveInference.accept(epoch)
                     mutableDashboardState.value = mutableDashboardState.value.copy(
                         sessionId = epoch.sessionId,
                         epochsGenerated = mutableDashboardState.value.epochsGenerated + 1,
+                        epochsInCurrentWindow = if (prediction != null) {
+                            FrozenSleepModelContract.sequenceEpochs
+                        } else {
+                            liveInference.currentWindowEpochCount(epoch.sessionId)
+                        },
+                        latestEpoch = epoch.toEpochSummary(),
+                        latestProbability = prediction?.probability ?: mutableDashboardState.value.latestProbability,
                     )
-                    liveInference.accept(epoch)?.let { prediction ->
-                        mutableDashboardState.value = mutableDashboardState.value.copy(
-                            latestProbability = prediction.probability,
-                        )
+                    prediction?.let {
                         sessionRepository.recordPrediction(
                             PredictionEventEntity(
                                 sessionId = epoch.sessionId,
                                 occurredAtEpochMillis = epoch.endEpochMillis,
-                                probability = prediction.probability,
+                                probability = it.probability,
                                 validInput = true,
                             ),
                         )

@@ -29,6 +29,21 @@ class LiveInferenceProcessorTest {
         assertEquals(0, calls)
     }
 
+    @Test
+    fun `completed prediction window resets before collecting the next ten epochs`() {
+        var calls = 0
+        val processor = LiveInferenceProcessor(ProbabilityModel { _, _ -> calls++; 0.6f })
+        repeat(10) { processor.accept(epoch(it)) }
+
+        repeat(9) { processor.accept(epoch(it + 10)) }
+        assertEquals(1, calls)
+        assertEquals(9, processor.currentWindowEpochCount("s1"))
+
+        processor.accept(epoch(19))
+        assertEquals(2, calls)
+        assertEquals(0, processor.currentWindowEpochCount("s1"))
+    }
+
     private fun epoch(index: Int, valid: Boolean = true): FeatureEpoch {
         val raw = FloatArray(FeatureValue.entries.size)
         raw[FeatureValue.ACTIVITY_COUNT.index] = 4f
