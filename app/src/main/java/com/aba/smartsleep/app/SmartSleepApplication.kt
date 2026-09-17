@@ -5,6 +5,9 @@ import android.util.Log
 import androidx.room.Room
 import com.aba.smartsleep.app.data.AppDatabase
 import com.aba.smartsleep.app.data.RoomSessionRepository
+import com.aba.smartsleep.app.data.PredictionEventEntity
+import com.aba.smartsleep.app.inference.LiveInferenceProcessor
+import com.aba.smartsleep.app.inference.OnnxProbabilityModel
 import com.aba.smartsleep.app.transport.PhoneBatchDataLayerRecovery
 import com.aba.smartsleep.app.transport.WearableReceiver
 import com.aba.smartsleep.app.transport.WatchAcknowledgementRetryCoordinator
@@ -24,8 +27,23 @@ class SmartSleepApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         WearableReceiver.initialize(filesDir)
+        val liveInference = LiveInferenceProcessor(OnnxProbabilityModel.fromAssetsOrNull(assets))
         sessionRepository = RoomSessionRepository(
             Room.databaseBuilder(applicationContext, AppDatabase::class.java, DATABASE_NAME).build(),
+            onCommittedEpochs = { epochs ->
+                epochs.forEach { epoch ->
+                    liveInference.accept(epoch)?.let { prediction ->
+                        sessionRepository.recordPrediction(
+                            PredictionEventEntity(
+                                sessionId = epoch.sessionId,
+                                occurredAtEpochMillis = epoch.endEpochMillis,
+                                probability = prediction.probability,
+                                validInput = true,
+                            ),
+                        )
+                    }
+                }
+            },
         )
         acknowledgementRetry = WatchAcknowledgementRetryCoordinator(
             pendingKeys = sessionRepository::pendingWatchAcknowledgements,

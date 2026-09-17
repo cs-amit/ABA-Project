@@ -4,6 +4,7 @@ import com.aba.smartsleep.core.inference.ProbabilityModel
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
+import java.io.File
 
 class OnnxProbabilityModelLoaderTest {
     @Test
@@ -30,5 +31,11 @@ class OnnxProbabilityModelLoaderTest {
     @Test
     fun `runtime initialization failure leaves model unavailable`() {
         assertNull(OnnxProbabilityModelLoader.load(bytes = { byteArrayOf(1) }) { error("bad model") })
+    }
+
+    @Test
+    fun `frozen model asset is bundled for the classroom build`() {
+        val asset = File("src/main/assets/${OnnxProbabilityModel.ASSET_PATH}")
+        assert(asset.isFile && asset.length() > 0)
     }
 }

@@ -29,12 +29,14 @@ class RoomSessionRepository(
     private val database: AppDatabase,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
     private val beforeDurableCommit: suspend () -> Unit = {},
+    private val onCommittedEpochs: suspend (List<FeatureEpoch>) -> Unit = {},
 ) : SessionRepository {
     private val transactionMutex = Mutex()
     private val pipelines = mutableMapOf<String, FeaturePipeline>()
 
     override suspend fun append(delivery: PhoneBatchDelivery): Boolean = transactionMutex.withLock {
         var committedPipeline: FeaturePipeline? = null
+        var committedEpochs = emptyList<FeatureEpoch>()
         database.withTransaction {
             val inserted = database.persistedBatchDao().insertIgnore(
                 PersistedPhoneBatchEntity(delivery.key.sessionId, delivery.key.sequence, nowEpochMillis()),
@@ -50,9 +52,11 @@ class RoomSessionRepository(
                     PendingWatchAcknowledgementEntity(delivery.key.sessionId, delivery.key.sequence),
                 )
                 committedPipeline = staged
+                committedEpochs = epochs
             }
         }
         committedPipeline?.let { pipelines[delivery.batch.sessionId] = it }
+        runCatching { onCommittedEpochs(committedEpochs) }
         // The transaction and checkpoint are durable before the release journal can be completed.
         delivery.confirmPersisted()
     }
