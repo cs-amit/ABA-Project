@@ -24,7 +24,7 @@ data class DemoInferenceResult(
 object DemoInferenceScenario {
     const val SESSION_ID = "demo-synthetic-sleep"
     const val LABEL = "Demo: synthetic sleep-like window"
-    private const val BASE_EPOCH_MILLIS = 1_758_219_300_000L // 2025-09-19 00:05 Asia/Kolkata
+    private const val BASE_EPOCH_MILLIS = 1_758_219_300_000L // 2025-09-18 23:45 Asia/Kolkata
     private const val EPOCH_MILLIS = 30_000L
 
     fun epochs(): List<FeatureEpoch> = List(FrozenSleepModelContract.sequenceEpochs) { index ->
