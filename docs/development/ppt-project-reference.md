@@ -424,3 +424,92 @@ Hardware identifiers used during verification:
 ## 18. Presentation closing message
 
 The project demonstrates a complete, failure-aware wearable ML pipeline: real watch sensing, durable transfer, causal feature construction, an experimentally selected and ONNX-exported model, a usable phone dashboard, and a safe fallback alarm. The strongest conclusion is not that the model is clinically accurate; it is that the end-to-end system is working and reproducible enough for a classroom demonstration, while its calibration, device-domain generalization, and live smart-alarm wiring remain clearly identified next steps.
+
+## 19. Historical experimentation timeline
+
+This section is useful for a “how we improved the model” slide.
+
+### Initial BIDSleep baselines
+
+BIDSleep v1.0.0 contains 47 participants, 253 nights, and 213,387 labelled 30-second epochs. The participant split used seed `20260821`: 29 train, 9 validation, and 9 test participants. The initial class counts were 116,952 rest and 96,435 light-sleep epochs.
+
+The early experiments established the baseline and rejected weak approaches:
+
+- fixed-threshold scaled logistic: test F1 `0.552`;
+- engineered CNN-GRU: test F1 `0.475`;
+- engineered CNN-LSTM: test F1 `0.515`;
+- tuned logistic: test F1 `0.626`;
+- XGBoost/ExtraTrees sweeps: did not beat the validation baseline;
+- causal-time logistic (`C=0.3`, threshold `0.345`): test F1 `0.641`, ROC-AUC `0.607`;
+- later raw/hybrid study: hybrid validation F1 `0.6350`, raw CNN-GRU test F1 `0.6234`, rolling engineered test F1 `0.6399`.
+
+The raw/hybrid study also exposed a deployment concern: raw HR availability was approximately 19% of one-second bins versus approximately 96% for accelerometry. The hybrid representation had 303 standardized features (180 raw, 120 engineered, and 3 time features), but its small validation gain was not confirmed on the locked test split.
+
+### MESA pilot and expansion
+
+The 24-participant MESA pilot produced 31,274 epochs using seed `20260915` and a 16/4/4 participant split. Its exploratory held-out test results were accuracy `0.7686`, balanced accuracy `0.7695`, precision `0.7062`, recall `0.9145`, F1 `0.7970`, ROC-AUC `0.8160`, PR-AUC `0.7254`, and Brier score `0.1634`. Because the test contained only four participants, this was a viability benchmark, not a deployment claim.
+
+The later MESA-500 expansion selected 500 participants with a 350/75/75 split, produced 629,646 labelled epochs, and recorded class counts of 373,553 rest and 256,093 light. It had 5,262 missing-activity epochs and 19 unlabelled rows. The selective download was approximately 2.45 GiB: 1,500 CSV/XML files and 2,629,389,426 server-reported bytes, with no EDF files.
+
+### Transfer and recovery
+
+The final selection was not a MESA-only model. The selected architecture was pretrained on MESA, then fine-tuned on the identical BIDSleep training participants. The validation ladder advanced this candidate because it had the strongest participant-macro F1 and balanced accuracy under the predeclared gate. The final test comparison remained exploratory because the BIDSleep test results had been seen in prior work.
+
+## 20. Exact final model architecture and training recipe
+
+The final neural model is a small causal sequence classifier:
+
+```text
+[batch, 10 epochs, 8 features]
+        │ transpose to channels-first
+Conv1d(8 → 32, kernel size 3, no future padding)
+        │ ReLU
+Unidirectional GRU(32 hidden units)
+        │ last time step
+Linear(32 → 1)
+        │ sigmoid
+Light-sleep probability
+```
+
+The convolution reduces the sequence to causal local patterns, the GRU summarizes the temporal progression, and the final sigmoid produces the positive-class probability. Training used Adam with learning rate `0.001`, batch size `256`, early-stopping patience `5`, hidden size `32`, ten epochs per sequence, participant-balanced loss contribution, and validation participant-macro-F1 checkpointing. Activity count receives `log1p`; the robust scaler is fit on BIDSleep training participants only. The MESA pretrained weights are loaded before BIDSleep fine-tuning.
+
+Implementation: `ml/models.py`, `ml/transfer_experiment.py`, and `ml/performance_experiment.py`.
+
+## 21. Reproducible demo output
+
+The deterministic synthetic scenario in `DemoInferenceScenario.kt` uses ten contiguous 30-second epochs with full coverage, activity count `0`, heart rate `60 bpm`, and HR standard deviation `1 bpm`. With the current `Asia/Kolkata` clock mapping and the bundled ONNX asset, the demo returns approximately `0.5672374`, displayed as `56.72%`, above the frozen threshold `0.37148505`.
+
+This value is a controlled software demonstration, not a measured sleep event. The connected instrumentation test verifies the more important invariant—that the bundled model returns a valid above-threshold result—without hard-coding a calibration claim.
+
+## 22. Current implementation caveats to state explicitly
+
+- The live ONNX probability is displayed and persisted, but it does not currently trigger `AlarmReason.LIGHT_SLEEP`; only the exact-time fallback alarm is wired to a real receiver/audio path.
+- `AlarmSettings.probabilityThreshold` defaults to `0.70`, while the frozen model threshold is `0.37148505`. This mismatch has no current runtime effect because smart-trigger wiring is not active, but it must be resolved before integrating live wake decisions.
+- The phone fallback’s `startWatchHaptics()` is currently a no-op. The Watch has a local alarm controller, but there is no completed phone-to-watch alarm signaling path.
+- The 15/30/45-minute wake-window choice is stored/displayed but does not yet modify the exact-time fallback or drive a smart wake decision.
+- `watchLinked=true` currently means that at least one batch was received; it is not a continuous connectivity probe.
+- IBI is captured and extracted but is not one of the eight deployed model inputs.
+- The training reports describe New York clock semantics, while the live Android bridge now uses India Standard Time as a deployment-context correction. The India-time change is validated by a unit test but is not a retrained model/calibration study.
+
+## 23. Ignored artifact locations
+
+These artifacts are intentionally ignored because they contain raw/licensed data, generated research outputs, or controlled evaluation material. They are useful for local reproduction but should not be copied into a public presentation repository:
+
+- corrected BIDSleep validation artifact: `ml/artifacts/bidsleep_corrected_validation/`;
+- performance-recovery outputs: `ml/artifacts/performance_recovery/`;
+- MESA pilot outputs: `ml/artifacts/mesa_pilot/`;
+- MESA-500 outputs: `ml/artifacts/mesa_500/`;
+- early transfer outputs: `ml/artifacts/mesa_transfer/`.
+
+The intentionally tracked deployment artifact is the small ONNX copy at `app/src/main/assets/models/mesa_transfer.onnx`.
+
+## 24. Existing visual/document assets
+
+Useful pre-existing artifacts for presentation preparation:
+
+- `docs/data/Smart-Sleep-Alarm-Training-Data-MESA.pptx`;
+- `docs/Smart-Sleep-Alarm-ML-Progress-Report-2026-09-04.docx`;
+- `docs/Smart-Sleep-Alarm-Technical-Findings-and-Microphone-Decision.docx`;
+- detailed specifications and implementation plans under `docs/superpowers/specs/` and `docs/superpowers/plans/`.
+
+Older status documents contain stale wording such as “no model bundled” or obsolete branch hashes. For the final presentation, treat the current code, latest feature-branch commits, this reference file, and the explicit evaluation reports as authoritative.
