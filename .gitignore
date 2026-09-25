@@ -24,3 +24,8 @@ ml/tests/__pycache__/
 # Presentation exports contain private team-identifying material and stay local.
 /output/*.pptx
 /output/pdf/Smart-Sleep-Alarm-7-Minute-Presentation-Script.pdf
+# Personalized academic submission materials stay local.
+/docs/create_final_project_report.py
+/output/Smart-Sleep-Alarm-Project-Report-IIM-Jammu.docx
+/output/New folder/
+/output/~$*.docx
